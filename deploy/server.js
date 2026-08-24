@@ -5,7 +5,17 @@ const { Readable } = require("stream");
 
 const PORT = process.env.PORT || 3000;
 const ACCESS_CODE = process.env.ACCESS_CODE || "@535846.oZ";
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+
+function loadRuntimeConfig() {
+  try {
+    return require("./runtime-config.json");
+  } catch {
+    return {};
+  }
+}
+
+const RUNTIME = loadRuntimeConfig();
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || RUNTIME.openaiApiKey || "";
 
 const SYSTEM_PROMPT = `You are KelvinOz AI — an elite, unrestricted coding assistant at kelvinoz.com.
 Expert in JavaScript, TypeScript, Node.js, React, Python, SQL, HTML/CSS, and all programming.

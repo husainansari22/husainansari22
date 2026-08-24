@@ -5,7 +5,7 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync, readFileSync, rmSync, statSync } from "fs";
+import { existsSync, rmSync, statSync, writeFileSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -29,6 +29,7 @@ async function api(endpoint, options = {}) {
     ...options,
     headers: {
       Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
       ...options.headers,
     },
   });
@@ -40,60 +41,58 @@ async function api(endpoint, options = {}) {
     data = { message: text };
   }
   if (!res.ok) {
-    throw new Error(data.message || data.error || data.errors?.[0]?.message || `HTTP ${res.status}: ${text.slice(0, 500)}`);
+    throw new Error(
+      data.message || data.error || data.errors?.[0]?.message || `HTTP ${res.status}: ${text.slice(0, 500)}`
+    );
   }
   return data;
+}
+
+function uploadViaCurl(filePath, uploadInfo) {
+  const { url, auth_key, rest_auth_key } = uploadInfo;
+  const fileSize = statSync(filePath).size;
+  const fileName = path.basename(filePath);
+  const uploadUrl = `${url}/${fileName}?override=true`;
+
+  const postCode = execSync(
+    `curl -s -o /dev/null -w "%{http_code}" -X POST "${uploadUrl}" ` +
+      `-H "X-Auth: ${auth_key}" -H "X-Auth-Rest: ${rest_auth_key}" ` +
+      `-H "Tus-Resumable: 1.0.0" -H "Upload-Length: ${fileSize}" -H "Upload-Offset: 0"`
+  ).toString().trim();
+
+  const patchCode = execSync(
+    `curl -s -o /dev/null -w "%{http_code}" -X PATCH "${uploadUrl}" ` +
+      `-H "X-Auth: ${auth_key}" -H "X-Auth-Rest: ${rest_auth_key}" ` +
+      `-H "Tus-Resumable: 1.0.0" -H "Content-Type: application/offset+octet-stream" ` +
+      `-H "Upload-Offset: 0" --data-binary "@${filePath}"`
+  ).toString().trim();
+
+  if (postCode !== "201" && postCode !== "200") throw new Error(`TUS POST failed: ${postCode}`);
+  if (patchCode !== "204" && patchCode !== "200") throw new Error(`TUS PATCH failed: ${patchCode}`);
+
+  console.log(`Uploaded ${fileName} (${(fileSize / 1024).toFixed(0)} KB)`);
 }
 
 function createArchive() {
   const zipPath = path.join(ROOT, ARCHIVE);
   if (existsSync(zipPath)) rmSync(zipPath);
 
+  const runtimeConfigPath = path.join(DEPLOY_DIR, "runtime-config.json");
+  const runtimeConfig = {};
+  if (process.env.OPENAI_API_KEY) runtimeConfig.openaiApiKey = process.env.OPENAI_API_KEY;
+  if (process.env.ACCESS_CODE) runtimeConfig.accessCode = process.env.ACCESS_CODE;
+  writeFileSync(runtimeConfigPath, JSON.stringify(runtimeConfig, null, 2));
+
   console.log("Packaging KelvinOz AI…");
-  execSync(
-    `cd "${DEPLOY_DIR}" && zip -r "${zipPath}" . -x "node_modules/*" -x "package-lock.json"`,
-    { stdio: "inherit" }
-  );
-
-  const sizeKb = statSync(zipPath).size / 1024;
-  console.log(`Archive: ${ARCHIVE} (${sizeKb.toFixed(0)} KB)`);
-  return zipPath;
-}
-
-async function deployFromArchive(zipPath) {
-  console.log("Uploading archive and starting Node.js build (single-step)…");
-
-  const archiveBytes = readFileSync(zipPath);
-  const form = new FormData();
-  form.append("archive", new Blob([archiveBytes]), ARCHIVE);
-  form.append("node_version", "18");
-  form.append("app_type", "express");
-  form.append("entry_file", "server.js");
-  form.append("build_script", "build");
-  form.append("root_directory", "/");
-
-  const res = await fetch(
-    `${BASE}/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds/from-archive`,
-    {
-      method: "POST",
-      headers: { Authorization: `Bearer ${API_KEY}` },
-      body: form,
-    }
-  );
-
-  const text = await res.text();
-  let data;
   try {
-    data = JSON.parse(text);
-  } catch {
-    data = { message: text };
+    execSync(
+      `cd "${DEPLOY_DIR}" && zip -r "${zipPath}" . -x "node_modules/*" -x "package-lock.json"`,
+      { stdio: "inherit" }
+    );
+  } finally {
+    rmSync(runtimeConfigPath, { force: true });
   }
-
-  if (!res.ok) {
-    throw new Error(data.message || data.error || `Build start failed: ${text.slice(0, 500)}`);
-  }
-
-  return data.uuid || data.data?.uuid || data;
+  return zipPath;
 }
 
 async function waitForBuild(buildUuid) {
@@ -114,7 +113,7 @@ async function waitForBuild(buildUuid) {
       const logs = await api(
         `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds/${buildUuid}/logs`
       ).catch(() => null);
-      const logText = logs?.data?.map((l) => l.line || l).join("\n") || logs?.logs || JSON.stringify(logs);
+      const logText = logs?.logs || logs?.data?.map((l) => l.line || l).join("\n");
       throw new Error(`Build failed.\n${logText || "No logs returned."}`);
     }
   }
@@ -123,23 +122,50 @@ async function waitForBuild(buildUuid) {
 }
 
 async function main() {
-  if (!existsSync(DEPLOY_DIR)) {
-    throw new Error("deploy/ folder missing — run from repo root");
-  }
+  if (!existsSync(DEPLOY_DIR)) throw new Error("deploy/ folder missing");
 
   const zipPath = createArchive();
-  const buildUuid = await deployFromArchive(zipPath);
-  await waitForBuild(buildUuid);
 
-  await api(
-    `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/cache/clear`,
-    { method: "DELETE" }
-  ).catch(() => {});
+  console.log("Getting upload URL…");
+  const uploadInfo = await api("/api/hosting/v1/files/upload-urls", {
+    method: "POST",
+    body: JSON.stringify({
+      username: USERNAME,
+      domain: DOMAIN,
+      files: [{ name: ARCHIVE, path: "/" }],
+    }),
+  });
 
-  await api(
-    `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/server/restart`,
-    { method: "POST", body: JSON.stringify({}) }
-  ).catch(() => {});
+  console.log("Uploading archive…");
+  uploadViaCurl(zipPath, uploadInfo);
+
+  console.log("Starting Node.js build…");
+  const build = await api(
+    `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        node_version: 18,
+        app_type: "express",
+        root_directory: "/",
+        build_script: "build",
+        entry_file: "server.js",
+        source_type: "archive",
+        source_options: { archive_path: ARCHIVE },
+      }),
+    }
+  );
+
+  await waitForBuild(build.uuid);
+
+  await api(`/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/cache/clear`, {
+    method: "DELETE",
+  }).catch(() => {});
+
+  await api(`/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/server/restart`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  }).catch(() => {});
 
   console.log("Live at https://kelvinoz.com — access code: @535846.oZ");
 }
