@@ -493,4 +493,20 @@ document.querySelectorAll(".suggestion").forEach((btn) => {
   btn.onclick = () => sendMessage(btn.dataset.prompt);
 });
 
+/* Keep input pinned above the mobile keyboard */
+function syncViewportHeight() {
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  document.documentElement.style.setProperty("--app-height", `${vh}px`);
+  if (window.visualViewport) {
+    const offset = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
+    document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+  }
+}
+syncViewportHeight();
+window.addEventListener("resize", syncViewportHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncViewportHeight);
+  window.visualViewport.addEventListener("scroll", syncViewportHeight);
+}
+
 render();
