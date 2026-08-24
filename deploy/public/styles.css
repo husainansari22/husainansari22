@@ -72,14 +72,45 @@ body { position: fixed; inset: 0; }
   background: transparent; color: var(--text); font-size: .95rem; cursor: pointer;
 }
 .conversations { flex: 1; overflow-y: auto; padding: .5rem; -webkit-overflow-scrolling: touch; }
+.conv-row {
+  display: flex;
+  align-items: center;
+  gap: .25rem;
+  margin-bottom: .2rem;
+  border-radius: 14px;
+}
+.conv-row.active, .conv-row:has(.conv-item:active) { background: var(--surface); }
 .conv-item {
-  width: 100%; display: flex; align-items: center; gap: .5rem; text-align: left;
+  flex: 1;
+  min-width: 0;
+  display: flex; align-items: center; gap: .5rem; text-align: left;
   min-height: 44px; padding: .7rem .85rem; border: none; border-radius: 14px;
   background: transparent; color: var(--muted); cursor: pointer; font-size: .9rem;
 }
-.conv-item.active, .conv-item:active { background: var(--surface); color: var(--text); }
+.conv-row.active .conv-item { color: var(--text); }
 .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv-files { font-size: .7rem; background: var(--surface-2); color: var(--accent); padding: .1rem .4rem; border-radius: 999px; }
+.conv-delete {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: .95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: manipulation;
+  opacity: .75;
+}
+.conv-delete:active {
+  background: rgba(234,67,53,0.15);
+  color: #f28b82;
+  opacity: 1;
+}
 .side-logout {
   margin: .5rem .85rem calc(.75rem + var(--safe-bottom)); min-height: 44px; border: none;
   border-radius: 14px; background: transparent; color: var(--muted); text-align: left; cursor: pointer;

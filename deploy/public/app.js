@@ -155,16 +155,35 @@ function renderConversations() {
   convListEl.innerHTML = conversations
     .map(
       (c) => `
-    <button type="button" class="conv-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
-      <span class="conv-title">${escapeHtml(c.title || "New chat")}</span>
-      ${c.files?.length ? `<span class="conv-files">${c.files.length}</span>` : ""}
-    </button>`
+    <div class="conv-row ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
+      <button type="button" class="conv-item" data-id="${c.id}">
+        <span class="conv-title">${escapeHtml(c.title || "New chat")}</span>
+        ${c.files?.length ? `<span class="conv-files">${c.files.length}</span>` : ""}
+      </button>
+      <button type="button" class="conv-delete" data-id="${c.id}" aria-label="Delete chat" title="Delete chat">🗑</button>
+    </div>`
     )
     .join("");
+
   convListEl.querySelectorAll(".conv-item").forEach((el) => {
     el.addEventListener("click", () => {
       activeId = el.dataset.id;
       closeSidebar();
+      render();
+    });
+  });
+
+  convListEl.querySelectorAll(".conv-delete").forEach((el) => {
+    el.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = el.dataset.id;
+      const conv = conversations.find((c) => c.id === id);
+      const label = (conv?.title || "this chat").slice(0, 40);
+      if (!confirm(`Delete “${label}”?`)) return;
+      conversations = conversations.filter((c) => c.id !== id);
+      if (activeId === id) activeId = conversations[0]?.id || null;
+      save();
       render();
     });
   });
