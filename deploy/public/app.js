@@ -452,36 +452,6 @@ async function sendMessage(text) {
   }
 }
 
-async function runDeploy() {
-  if (isLoading) return;
-  hideError();
-  isLoading = true;
-  showError("Deploying to kelvinoz.com…");
-  errorEl.style.background = "rgba(124, 58, 237, 0.15)";
-  errorEl.style.borderColor = "rgba(124, 58, 237, 0.4)";
-  errorEl.style.color = "#c4b5fd";
-
-  try {
-    const res = await fetch("/api/deploy", { method: "POST" });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || "Deploy failed");
-
-    const conv = getActive();
-    if (conv) {
-      ensureConvFields(conv);
-      conv.deployments.push({ status: "completed", message: "Live at https://kelvinoz.com", at: Date.now() });
-      save();
-    }
-    hideError();
-    alert("Deployed! Live at https://kelvinoz.com");
-    render();
-  } catch (err) {
-    showError(err.message);
-  } finally {
-    isLoading = false;
-  }
-}
-
 function onTap(el, handler) {
   if (!el) return;
   el.addEventListener("click", (e) => {

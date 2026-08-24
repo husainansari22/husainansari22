@@ -113,11 +113,6 @@ body {
   font-size: 1rem;
   cursor: pointer;
 }
-.btn-deploy {
-  width: 100%; min-height: 44px; margin-bottom: 0.5rem; border-radius: 12px;
-  border: 1px solid rgba(34,197,94,0.3); background: rgba(34,197,94,0.12);
-  color: #86efac; cursor: pointer; font-size: 0.875rem;
-}
 .conversations { flex: 1; overflow-y: auto; padding: 0 0.5rem; -webkit-overflow-scrolling: touch; }
 .conv-item {
   display: flex; align-items: center; gap: 0.5rem;
