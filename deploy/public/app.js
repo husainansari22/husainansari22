@@ -19,9 +19,22 @@ const filesPanel = document.getElementById("files-panel");
 const filesList = document.getElementById("files-list");
 const filesToggle = document.getElementById("files-toggle");
 const filesCount = document.getElementById("files-count");
+const menuBtn = document.getElementById("menu-btn");
 
 function save() {
-  localStorage.setItem("kelvinoz_chats", JSON.stringify(conversations));
+  try {
+    localStorage.setItem("kelvinoz_chats", JSON.stringify(conversations));
+  } catch {
+    // storage full — drop old attachment blobs
+    conversations = conversations.map((c) => ({
+      ...c,
+      messages: (c.messages || []).map((m) => ({
+        ...m,
+        attachments: (m.attachments || []).map(({ name, type, size }) => ({ name, type, size })),
+      })),
+    }));
+    localStorage.setItem("kelvinoz_chats", JSON.stringify(conversations));
+  }
 }
 
 function uid() {
@@ -35,11 +48,12 @@ function getActive() {
 function ensureConvFields(conv) {
   if (!conv.files) conv.files = [];
   if (!conv.deployments) conv.deployments = [];
+  if (!conv.messages) conv.messages = [];
 }
 
 function escapeHtml(text) {
   const d = document.createElement("div");
-  d.textContent = text;
+  d.textContent = text == null ? "" : String(text);
   return d.innerHTML;
 }
 
@@ -59,18 +73,13 @@ function extractFilesFromContent(content) {
   const regex = /```(\w*)\n([\s\S]*?)```/g;
   let match;
   let i = 0;
-  while ((match = regex.exec(content)) !== null) {
+  while ((match = regex.exec(content || "")) !== null) {
     const lang = match[1] || "txt";
     const code = match[2].trim();
     if (code.length < 10) continue;
-    const firstLine = code.split("\n")[0];
-    let filename = `file-${++i}.${lang || "txt"}`;
-    if (/^(?:\/[\w.-]+)+|\w+\.\w+/.test(firstLine) && firstLine.length < 80) {
-      filename = firstLine.replace(/^\/+/, "");
-    }
     files.push({
       id: uid(),
-      filename,
+      filename: `file-${++i}.${lang || "txt"}`,
       content: code,
       language: lang,
       createdAt: Date.now(),
@@ -89,6 +98,20 @@ function mergeFiles(conv, newFiles) {
   }
 }
 
+function openSidebar() {
+  sidebarEl.classList.add("open");
+  sidebarEl.setAttribute("aria-hidden", "false");
+  overlayEl.classList.add("show");
+  overlayEl.setAttribute("aria-hidden", "false");
+}
+
+function closeSidebar() {
+  sidebarEl.classList.remove("open");
+  sidebarEl.setAttribute("aria-hidden", "true");
+  overlayEl.classList.remove("show");
+  overlayEl.setAttribute("aria-hidden", "true");
+}
+
 function renderFilesPanel() {
   const conv = getActive();
   if (!conv) {
@@ -99,7 +122,7 @@ function renderFilesPanel() {
   ensureConvFields(conv);
   const count = conv.files.length;
   filesToggle.hidden = count === 0;
-  filesCount.textContent = count;
+  filesCount.textContent = String(count);
 
   filesList.innerHTML = conv.files.length
     ? conv.files
@@ -109,32 +132,25 @@ function renderFilesPanel() {
         <div class="file-icon">${(f.language || "file").slice(0, 2).toUpperCase()}</div>
         <div class="file-info">
           <span class="file-name">${escapeHtml(f.filename)}</span>
-          <span class="file-meta">${f.lines || f.content.split("\n").length} lines</span>
+          <span class="file-meta">${f.lines || (f.content || "").split("\n").length} lines</span>
         </div>
-        <button class="file-dl" data-id="${f.id}" title="Download">↓</button>
+        <button type="button" class="file-dl" data-id="${f.id}" title="Download">↓</button>
       </div>`
         )
         .join("")
     : `<p class="files-empty">No files yet — ask the AI to build something</p>`;
 
   filesList.querySelectorAll(".file-dl").forEach((btn) => {
-    btn.onclick = (e) => {
+    btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const file = conv.files.find((f) => f.id === btn.dataset.id);
       if (!file) return;
-      const blob = new Blob([file.content], { type: "text/plain" });
+      const blob = new Blob([file.content || ""], { type: "text/plain" });
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob);
-      a.download = file.filename.split("/").pop();
+      a.download = (file.filename || "file").split("/").pop();
       a.click();
-    };
-  });
-
-  filesList.querySelectorAll(".file-item").forEach((el) => {
-    el.onclick = () => {
-      const file = conv.files.find((f) => f.id === el.dataset.id);
-      if (file) alert(file.content.slice(0, 8000) + (file.content.length > 8000 ? "\n…" : ""));
-    };
+    });
   });
 }
 
@@ -142,18 +158,18 @@ function renderConversations() {
   convListEl.innerHTML = conversations
     .map(
       (c) =>
-        `<div class="conv-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
-          <span class="conv-title">${escapeHtml(c.title)}</span>
+        `<button type="button" class="conv-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
+          <span class="conv-title">${escapeHtml(c.title || "New chat")}</span>
           ${c.files?.length ? `<span class="conv-files">${c.files.length}</span>` : ""}
-        </div>`
+        </button>`
     )
     .join("");
   convListEl.querySelectorAll(".conv-item").forEach((el) => {
-    el.onclick = () => {
+    el.addEventListener("click", () => {
       activeId = el.dataset.id;
       closeSidebar();
       render();
-    };
+    });
   });
 }
 
@@ -176,9 +192,9 @@ function renderMessages() {
     if (m.attachments?.length) {
       inner += m.attachments
         .map((a) => {
-          if (a.type.startsWith("image/"))
-            return `<img class="msg-image" src="${a.dataUrl}" alt="${escapeHtml(a.name)}" />`;
-          return `<div class="msg-file-tag">📎 ${escapeHtml(a.name)}</div>`;
+          if (a.dataUrl && String(a.type || "").startsWith("image/"))
+            return `<img class="msg-image" src="${a.dataUrl}" alt="${escapeHtml(a.name || "image")}" />`;
+          return `<div class="msg-file-tag">📎 ${escapeHtml(a.name || "file")}</div>`;
         })
         .join("");
     }
@@ -187,10 +203,7 @@ function renderMessages() {
       inner += m.role === "assistant" ? formatMarkdown(m.content) : escapeHtml(m.content).replace(/\n/g, "<br>");
     }
 
-    div.innerHTML = `
-      <div class="msg-avatar">${m.role === "user" ? "You" : "AI"}</div>
-      <div class="msg-content">${inner || '<span class="typing"><span></span><span></span><span></span></span>'}</div>
-    `;
+    div.innerHTML = `<div class="msg-content">${inner || '<span class="typing"><span></span><span></span><span></span></span>'}</div>`;
     messagesEl.appendChild(div);
   });
 
@@ -220,16 +233,9 @@ function showError(msg) {
 
 function hideError() {
   errorEl.hidden = true;
-}
-
-function openSidebar() {
-  sidebarEl.classList.add("open");
-  overlayEl.hidden = false;
-}
-
-function closeSidebar() {
-  sidebarEl.classList.remove("open");
-  overlayEl.hidden = true;
+  errorEl.style.background = "";
+  errorEl.style.borderColor = "";
+  errorEl.style.color = "";
 }
 
 function renderAttachmentPreviews() {
@@ -243,72 +249,116 @@ function renderAttachmentPreviews() {
     .map(
       (a, i) => `
     <div class="att-preview">
-      ${a.type.startsWith("image/") ? `<img src="${a.dataUrl}" alt="" />` : `<span>📎 ${escapeHtml(a.name)}</span>`}
-      <button data-i="${i}" class="att-remove">✕</button>
+      ${String(a.type || "").startsWith("image/") && a.dataUrl ? `<img src="${a.dataUrl}" alt="" />` : `<span>📎 ${escapeHtml(a.name)}</span>`}
+      <button type="button" data-i="${i}" class="att-remove" aria-label="Remove">✕</button>
     </div>`
     )
     .join("");
   attachmentsEl.querySelectorAll(".att-remove").forEach((btn) => {
-    btn.onclick = () => {
+    btn.addEventListener("click", () => {
       pendingAttachments.splice(Number(btn.dataset.i), 1);
       renderAttachmentPreviews();
-    };
+    });
   });
 }
 
-async function readFileAsAttachment(file) {
+function readFileAsAttachment(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
+      const isText =
+        String(file.type || "").startsWith("text/") ||
+        /\.(js|ts|tsx|jsx|py|json|md|css|html|txt|csv|xml|yaml|yml)$/i.test(file.name);
       resolve({
         name: file.name,
         type: file.type || "application/octet-stream",
         size: file.size,
-        dataUrl: reader.result,
-        text: file.type.startsWith("text/") || /\.(js|ts|tsx|jsx|py|json|md|css|html|txt|csv|xml|yaml|yml)$/i.test(file.name)
-          ? reader.result
-          : null,
+        dataUrl: typeof reader.result === "string" && reader.result.startsWith("data:") ? reader.result : null,
+        text: isText && typeof reader.result === "string" && !reader.result.startsWith("data:") ? reader.result : null,
       });
     };
     reader.onerror = reject;
-    if (file.type.startsWith("image/") || file.type.startsWith("video/")) reader.readAsDataURL(file);
-    else reader.readAsText(file);
+    if (String(file.type || "").startsWith("image/") || String(file.type || "").startsWith("video/")) {
+      reader.readAsDataURL(file);
+    } else {
+      reader.readAsText(file);
+    }
   });
+}
+
+function sanitizeMessagesForApi(messages) {
+  return messages
+    .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
+    .map((m) => {
+      if (typeof m.content === "string") return { role: m.role, content: m.content };
+      return { role: m.role, content: m.content };
+    });
 }
 
 function buildApiMessages(conv, userText, attachments) {
-  const prior = conv.messages.slice(0, -2).filter((m) => m.role !== "system");
-  const history = prior.map(({ role, content, attachments: att }) => {
-    if (role === "user" && att?.length) {
-      const parts = [{ type: "text", text: content }];
-      for (const a of att) {
-        if (a.type.startsWith("image/")) parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
-        else if (a.text) parts.push({ type: "text", text: `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}` });
-        else parts.push({ type: "text", text: `\n\n[Attached: ${a.name}]` });
-      }
-      return { role, content: parts };
+  const prior = conv.messages
+    .slice(0, -2)
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
+    .map(({ role, content }) => ({ role, content }));
+
+  const hasImages = attachments.some((a) => String(a.type || "").startsWith("image/") && a.dataUrl);
+  if (!hasImages) {
+    let text = userText;
+    for (const a of attachments) {
+      if (a.text) text += `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}`;
+      else text += `\n\n[Attached: ${a.name}]`;
     }
-    return { role, content };
-  });
+    return sanitizeMessagesForApi([...prior, { role: "user", content: text }]);
+  }
 
   const parts = [{ type: "text", text: userText }];
   for (const a of attachments) {
-    if (a.type.startsWith("image/")) {
+    if (String(a.type || "").startsWith("image/") && a.dataUrl) {
       parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
     } else if (a.text) {
       parts.push({ type: "text", text: `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}` });
-    } else if (a.type.startsWith("video/")) {
-      parts.push({ type: "text", text: `\n\n[Video attached: ${a.name} — describe or analyze based on filename/context]` });
     } else {
-      parts.push({ type: "text", text: `\n\n[File attached: ${a.name}]` });
+      parts.push({ type: "text", text: `\n\n[Attached: ${a.name}]` });
     }
   }
+  return [...prior, { role: "user", content: parts }];
+}
 
-  return [...history, { role: "user", content: parts.length === 1 ? userText : parts }];
+function applyStreamEvent(evt, conv, state) {
+  if (evt.type === "content" && evt.delta) {
+    state.full += evt.delta;
+    conv.messages[conv.messages.length - 1].content = state.full;
+    renderMessages();
+    return;
+  }
+  // Back-compat with raw OpenAI chunks
+  if (evt.choices?.[0]?.delta?.content) {
+    state.full += evt.choices[0].delta.content;
+    conv.messages[conv.messages.length - 1].content = state.full;
+    renderMessages();
+    return;
+  }
+  if (evt.type === "file" && evt.file) {
+    mergeFiles(conv, [evt.file]);
+    renderFilesPanel();
+    save();
+    return;
+  }
+  if (evt.type === "deploy") {
+    ensureConvFields(conv);
+    conv.deployments.push({ status: evt.status, message: evt.message, at: Date.now() });
+    save();
+    renderMessages();
+    return;
+  }
+  if (evt.type === "error") {
+    throw new Error(typeof evt.error === "string" ? evt.error : JSON.stringify(evt.error));
+  }
 }
 
 async function sendMessage(text) {
-  const trimmed = text.trim();
+  const trimmed = (text || "").trim();
   if ((!trimmed && !pendingAttachments.length) || isLoading) return;
   hideError();
 
@@ -324,7 +374,8 @@ async function sendMessage(text) {
   pendingAttachments = [];
   renderAttachmentPreviews();
 
-  const displayText = trimmed || (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
+  const displayText =
+    trimmed || (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
   conv.messages.push({ role: "user", content: displayText, attachments, createdAt: Date.now() });
   conv.messages.push({ role: "assistant", content: "", createdAt: Date.now() });
 
@@ -340,10 +391,11 @@ async function sendMessage(text) {
   sendBtn.disabled = true;
 
   try {
+    const payload = { messages: buildApiMessages(conv, displayText, attachments) };
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: buildApiMessages(conv, displayText, attachments) }),
+      body: JSON.stringify(payload),
     });
 
     if (!res.ok) {
@@ -354,7 +406,7 @@ async function sendMessage(text) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    let full = "";
+    const state = { full: "" };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -366,44 +418,37 @@ async function sendMessage(text) {
       for (const line of lines) {
         if (!line.startsWith("data:")) continue;
         const raw = line.slice(5).trim();
-        if (!raw) continue;
+        if (!raw || raw === "[DONE]") continue;
+        let evt;
         try {
-          const evt = JSON.parse(raw);
-          if (evt.type === "content" && evt.delta) {
-            full += evt.delta;
-            conv.messages[conv.messages.length - 1].content = full;
-            renderMessages();
-          }
-          if (evt.type === "file" && evt.file) {
-            mergeFiles(conv, [evt.file]);
-            renderFilesPanel();
-            save();
-          }
-          if (evt.type === "deploy") {
-            conv.deployments.push({ status: evt.status, message: evt.message, at: Date.now() });
-            save();
-            renderMessages();
-          }
-          if (evt.type === "error") throw new Error(evt.error);
-        } catch (e) {
-          if (e.message && !e.message.includes("JSON")) throw e;
+          evt = JSON.parse(raw);
+        } catch {
+          continue;
         }
+        applyStreamEvent(evt, conv, state);
       }
     }
 
-    const extracted = extractFilesFromContent(full);
+    if (!state.full.trim()) {
+      throw new Error("No response from AI. Try again.");
+    }
+
+    const extracted = extractFilesFromContent(state.full);
     if (extracted.length) mergeFiles(conv, extracted);
     save();
     render();
   } catch (err) {
-    showError(err.message);
-    conv.messages.pop();
-    conv.messages.pop();
-    save();
-    render();
+    showError(err.message || "Chat failed");
+    if (!conv.messages[conv.messages.length - 1]?.content) {
+      conv.messages.pop();
+      conv.messages.pop();
+      save();
+      render();
+    }
   } finally {
     isLoading = false;
     sendBtn.disabled = false;
+    inputEl.focus();
   }
 }
 
@@ -432,52 +477,57 @@ async function runDeploy() {
     render();
   } catch (err) {
     showError(err.message);
-    errorEl.style.background = "";
-    errorEl.style.borderColor = "";
-    errorEl.style.color = "";
   } finally {
     isLoading = false;
   }
 }
 
-document.getElementById("new-chat").onclick = () => {
+function onTap(el, handler) {
+  if (!el) return;
+  el.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handler(e);
+  });
+}
+
+onTap(menuBtn, openSidebar);
+onTap(document.getElementById("sidebar-close"), closeSidebar);
+onTap(overlayEl, closeSidebar);
+onTap(document.getElementById("new-chat"), () => {
   activeId = null;
   closeSidebar();
   render();
-};
-
-document.getElementById("logout").onclick = async () => {
+});
+onTap(document.getElementById("logout"), async () => {
   await fetch("/api/logout", { method: "POST" });
   location.href = "/login";
-};
-
-document.getElementById("deploy-btn").onclick = () => {
+});
+onTap(document.getElementById("deploy-btn"), () => {
   closeSidebar();
   runDeploy();
-};
-
-document.getElementById("menu-btn").onclick = openSidebar;
-overlayEl.onclick = closeSidebar;
-
-filesToggle.onclick = () => {
+});
+onTap(filesToggle, () => {
   filesPanel.hidden = !filesPanel.hidden;
-};
-document.getElementById("files-close").onclick = () => {
+});
+onTap(document.getElementById("files-close"), () => {
   filesPanel.hidden = true;
-};
+});
+onTap(attachBtn, () => {
+  fileInput.click();
+});
+onTap(sendBtn, () => sendMessage(inputEl.value));
 
-attachBtn.onclick = () => fileInput.click();
-fileInput.onchange = async (e) => {
-  for (const file of e.target.files) {
+fileInput.addEventListener("change", async (e) => {
+  for (const file of e.target.files || []) {
     try {
       pendingAttachments.push(await readFileAsAttachment(file));
     } catch {}
   }
   fileInput.value = "";
   renderAttachmentPreviews();
-};
+});
 
-sendBtn.onclick = () => sendMessage(inputEl.value);
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
@@ -486,27 +536,11 @@ inputEl.addEventListener("keydown", (e) => {
 });
 inputEl.addEventListener("input", () => {
   inputEl.style.height = "auto";
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 160) + "px";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
 });
 
 document.querySelectorAll(".suggestion").forEach((btn) => {
-  btn.onclick = () => sendMessage(btn.dataset.prompt);
+  onTap(btn, () => sendMessage(btn.dataset.prompt));
 });
-
-/* Keep input pinned above the mobile keyboard */
-function syncViewportHeight() {
-  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${vh}px`);
-  if (window.visualViewport) {
-    const offset = Math.max(0, window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop);
-    document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
-  }
-}
-syncViewportHeight();
-window.addEventListener("resize", syncViewportHeight);
-if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", syncViewportHeight);
-  window.visualViewport.addEventListener("scroll", syncViewportHeight);
-}
 
 render();

@@ -124,7 +124,13 @@ function serveFile(res, filePath) {
       res.end("Not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(filePath)] || "application/octet-stream" });
+    const ext = path.extname(filePath);
+    const headers = { "Content-Type": MIME[ext] || "application/octet-stream" };
+    if (ext === ".html" || ext === ".js" || ext === ".css") {
+      headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0";
+      headers.Pragma = "no-cache";
+    }
+    res.writeHead(200, headers);
     res.end(data);
   });
 }
@@ -176,14 +182,19 @@ async function handleChat(req, res, body) {
   const apiKey = body?.apiKey || OPENAI_API_KEY;
   if (!apiKey) return sendJson(res, 401, { error: "Set OPENAI_API_KEY on the server." });
 
+  const cleanMessages = (messages || [])
+    .filter((m) => m && (m.role === "user" || m.role === "assistant" || m.role === "system"))
+    .filter((m) => m.content != null && m.content !== "")
+    .map((m) => ({ role: m.role, content: m.content }));
+
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache",
+    "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
   });
 
   const emit = (payload) => sseWrite(res, payload);
-  let conversation = [{ role: "system", content: SYSTEM_PROMPT }, ...(messages || [])];
+  let conversation = [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages];
 
   try {
     for (let round = 0; round < 8; round++) {
@@ -202,7 +213,8 @@ async function handleChat(req, res, body) {
       });
 
       if (!upstream.ok) {
-        emit({ type: "error", error: await upstream.text() });
+        const errText = await upstream.text();
+        emit({ type: "error", error: errText.slice(0, 800) });
         break;
       }
 
@@ -247,15 +259,15 @@ async function handleChat(req, res, body) {
         }
       }
 
-      const calls = Object.values(toolCalls);
-      if (finishReason === "tool_calls" && calls.length) {
+      const calls = Object.values(toolCalls).filter((c) => c.name);
+      if ((finishReason === "tool_calls" || calls.length) && calls.length) {
         conversation.push({
           role: "assistant",
           content: currentContent || null,
           tool_calls: calls.map((c, i) => ({
             id: c.id || `call_${i}`,
             type: "function",
-            function: { name: c.name, arguments: c.arguments },
+            function: { name: c.name, arguments: c.arguments || "{}" },
           })),
         });
 
@@ -267,7 +279,7 @@ async function handleChat(req, res, body) {
           const result = await runTool(call.name, args, emit);
           conversation.push({
             role: "tool",
-            tool_call_id: call.id,
+            tool_call_id: call.id || `call_${calls.indexOf(call)}`,
             content: result,
           });
         }
