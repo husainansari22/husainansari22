@@ -56,8 +56,8 @@ export async function POST(request: NextRequest) {
     };
 
     if (normalizedBase.includes("openrouter.ai")) {
-      headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_APP_URL || "https://unbound-ai.app";
-      headers["X-Title"] = "Unbound AI";
+      headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_APP_URL || "https://kelvinoz.com";
+      headers["X-Title"] = "KelvinOz AI";
     }
 
     const upstream = await fetch(url, {

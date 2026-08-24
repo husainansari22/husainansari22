@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { Menu, Sparkles, Code, PenLine, Lightbulb, Globe } from "lucide-react";
+import { Menu, Sparkles, Code, Terminal, Database, Layers } from "lucide-react";
 import { Sidebar } from "./Sidebar";
 import { MessageBubble } from "./MessageBubble";
 import { ChatInput } from "./ChatInput";
@@ -12,10 +12,10 @@ import { loadConversations, loadSettings, saveConversations, saveSettings } from
 import { generateTitle, streamChatResponse } from "@/lib/chat-client";
 
 const SUGGESTIONS = [
-  { icon: Code, text: "Write a Python web scraper for news headlines" },
-  { icon: PenLine, text: "Help me draft a compelling product launch email" },
-  { icon: Lightbulb, text: "Explain quantum computing like I'm 12" },
-  { icon: Globe, text: "Plan a 2-week trip to Japan on a budget" },
+  { icon: Code, text: "Build a complete React todo app with localStorage persistence" },
+  { icon: Terminal, text: "Write a Node.js Express API with JWT auth and MongoDB" },
+  { icon: Database, text: "Create a PostgreSQL schema for an e-commerce platform" },
+  { icon: Layers, text: "Build a full-stack SaaS dashboard with auth and billing" },
 ];
 
 export function ChatApp() {
@@ -80,6 +80,11 @@ export function ChatApp() {
     createConversation();
     setInput("");
     setError(null);
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.href = "/login";
   };
 
   const handleDelete = (id: string) => {
@@ -168,7 +173,7 @@ export function ChatApp() {
       <div className="flex h-screen items-center justify-center bg-zinc-950">
         <div className="flex items-center gap-3 text-zinc-400">
           <Sparkles className="animate-pulse text-violet-400" size={24} />
-          Loading Unbound AI…
+          Loading KelvinOz AI…
         </div>
       </div>
     );
@@ -183,6 +188,7 @@ export function ChatApp() {
         onNew={handleNewChat}
         onDelete={handleDelete}
         onOpenSettings={() => setShowSettings(true)}
+        onLogout={handleLogout}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
@@ -198,7 +204,7 @@ export function ChatApp() {
           </button>
           <div className="min-w-0 flex-1">
             <h2 className="truncate font-medium text-white">
-              {activeConversation?.title || "Unbound AI"}
+              {activeConversation?.title || "KelvinOz AI"}
             </h2>
             <p className="text-xs text-zinc-500">
               {settings.model} · {settings.baseUrl.replace(/^https?:\/\//, "").split("/")[0]}
@@ -213,11 +219,11 @@ export function ChatApp() {
                 <Sparkles size={32} className="text-violet-400" />
               </div>
               <h1 className="mb-2 text-3xl font-bold tracking-tight text-white">
-                Ask anything.
+                Code anything.
               </h1>
               <p className="mb-10 max-w-md text-zinc-400">
-                Unbound AI connects to any OpenAI-compatible model. No message caps, no topic
-                blocks — just pure conversation powered by your API key.
+                KelvinOz AI on kelvinoz.com — uncensored, unrestricted coding assistant.
+                Full-stack expert. No limits.
               </p>
               <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
                 {SUGGESTIONS.map(({ icon: Icon, text }) => (

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, MessageSquare, Trash2, Settings, Sparkles } from "lucide-react";
+import { Plus, MessageSquare, Trash2, Settings, Sparkles, LogOut } from "lucide-react";
 import { Conversation } from "@/types/chat";
 
 interface SidebarProps {
@@ -10,6 +10,7 @@ interface SidebarProps {
   onNew: () => void;
   onDelete: (id: string) => void;
   onOpenSettings: () => void;
+  onLogout: () => void;
   isOpen: boolean;
   onClose: () => void;
 }
@@ -21,6 +22,7 @@ export function Sidebar({
   onNew,
   onDelete,
   onOpenSettings,
+  onLogout,
   isOpen,
   onClose,
 }: SidebarProps) {
@@ -45,8 +47,8 @@ export function Sidebar({
             <Sparkles size={18} className="text-white" />
           </div>
           <div>
-            <h1 className="font-semibold text-white">Unbound AI</h1>
-            <p className="text-xs text-zinc-500">No limits. No filters.</p>
+            <h1 className="font-semibold text-white">KelvinOz AI</h1>
+            <p className="text-xs text-zinc-500">kelvinoz.com · Uncensored</p>
           </div>
         </div>
 
@@ -100,13 +102,20 @@ export function Sidebar({
           )}
         </div>
 
-        <div className="border-t border-white/10 p-3">
+        <div className="space-y-1 border-t border-white/10 p-3">
           <button
             onClick={onOpenSettings}
             className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-zinc-200"
           >
             <Settings size={16} />
             Settings
+          </button>
+          <button
+            onClick={onLogout}
+            className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-red-400"
+          >
+            <LogOut size={16} />
+            Log out
           </button>
         </div>
       </aside>

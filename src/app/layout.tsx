@@ -13,13 +13,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Unbound AI — No Limits. No Filters.",
+  title: "KelvinOz AI — Uncensored Coding Assistant",
   description:
-    "A beautiful, unrestricted AI chat interface. Connect any OpenAI-compatible model, customize your system prompt, and chat without artificial limits.",
-  keywords: ["AI", "chat", "GPT", "Claude", "OpenRouter", "unrestricted"],
+    "Private unrestricted AI coding assistant at kelvinoz.com. Expert in JavaScript, TypeScript, Node.js, React, and full-stack development with Hostinger integration.",
+  keywords: ["AI", "coding", "JavaScript", "TypeScript", "kelvinoz", "uncensored"],
   openGraph: {
-    title: "Unbound AI",
-    description: "Ask anything. No limits. No filters.",
+    title: "KelvinOz AI",
+    description: "Uncensored coding assistant — kelvinoz.com",
     type: "website",
   },
 };

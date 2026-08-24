@@ -18,7 +18,7 @@ export function ChatInput({
   onSubmit,
   disabled,
   isLoading,
-  placeholder = "Ask anything — no limits, no filters…",
+  placeholder = "Ask anything — code, debug, deploy, no limits…",
 }: ChatInputProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
