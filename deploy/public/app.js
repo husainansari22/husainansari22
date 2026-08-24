@@ -503,10 +503,6 @@ onTap(document.getElementById("logout"), async () => {
   await fetch("/api/logout", { method: "POST" });
   location.href = "/login";
 });
-onTap(document.getElementById("deploy-btn"), () => {
-  closeSidebar();
-  runDeploy();
-});
 onTap(filesToggle, () => {
   filesPanel.hidden = !filesPanel.hidden;
 });
