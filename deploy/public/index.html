@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KelvinOz AI — Uncensored Coding Assistant</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-sm">✦</div>
+        <div>
+          <strong>KelvinOz AI</strong>
+          <span>kelvinoz.com · Uncensored</span>
+        </div>
+      </div>
+      <button id="new-chat" class="btn-new">+ New Chat</button>
+      <div id="conversations" class="conversations"></div>
+      <div class="sidebar-footer">
+        <button id="logout">Log out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="header">
+        <h2 id="chat-title">KelvinOz AI</h2>
+        <span class="model-tag">gpt-4o · Uncensored</span>
+      </header>
+
+      <div id="messages" class="messages">
+        <div id="welcome" class="welcome">
+          <div class="welcome-icon">✦</div>
+          <h1>Code anything.</h1>
+          <p>Uncensored, unrestricted coding assistant. No limits.</p>
+          <div class="suggestions">
+            <button class="suggestion" data-prompt="Build a complete React todo app with localStorage">Build a React todo app with localStorage</button>
+            <button class="suggestion" data-prompt="Write a Node.js Express API with JWT auth">Write a Node.js Express API with JWT</button>
+            <button class="suggestion" data-prompt="Create a PostgreSQL schema for e-commerce">Create a PostgreSQL e-commerce schema</button>
+            <button class="suggestion" data-prompt="Explain async/await vs Promises with examples">Explain async/await vs Promises</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="error" class="error-bar" hidden></div>
+
+      <div class="input-area">
+        <div class="input-box">
+          <textarea id="input" rows="1" placeholder="Ask anything — code, debug, build… no limits"></textarea>
+          <button id="send" aria-label="Send">↑</button>
+        </div>
+        <p class="input-hint">Enter to send · Shift+Enter for new line</p>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

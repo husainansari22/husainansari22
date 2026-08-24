@@ -5,13 +5,13 @@
  */
 
 import { execSync } from "child_process";
-import { existsSync, statSync, writeFileSync, rmSync } from "fs";
+import { existsSync, readFileSync, rmSync, statSync } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
-const STAGING = path.join(ROOT, ".deploy-staging");
+const DEPLOY_DIR = path.join(ROOT, "deploy");
 const ARCHIVE = "kelvinoz-app.zip";
 
 const API_KEY = process.env.HOSTINGER_API_KEY;
@@ -29,7 +29,6 @@ async function api(endpoint, options = {}) {
     ...options,
     headers: {
       Authorization: `Bearer ${API_KEY}`,
-      "Content-Type": "application/json",
       ...options.headers,
     },
   });
@@ -40,135 +39,109 @@ async function api(endpoint, options = {}) {
   } catch {
     data = { message: text };
   }
-  if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+  if (!res.ok) {
+    throw new Error(data.message || data.error || data.errors?.[0]?.message || `HTTP ${res.status}: ${text.slice(0, 500)}`);
+  }
   return data;
 }
 
-function uploadViaCurl(filePath, uploadInfo) {
-  const { url, auth_key, rest_auth_key } = uploadInfo;
-  const fileSize = statSync(filePath).size;
-  const fileName = path.basename(filePath);
-  const uploadUrl = `${url}/${fileName}?override=true`;
-
-  execSync(
-    `curl -s -X POST "${uploadUrl}" ` +
-      `-H "X-Auth: ${auth_key}" ` +
-      `-H "X-Auth-Rest: ${rest_auth_key}" ` +
-      `-H "Tus-Resumable: 1.0.0" ` +
-      `-H "Upload-Length: ${fileSize}" ` +
-      `-H "Upload-Offset: 0"`,
-    { stdio: "inherit" }
-  );
-
-  execSync(
-    `curl -s -X PATCH "${uploadUrl}" ` +
-      `-H "X-Auth: ${auth_key}" ` +
-      `-H "X-Auth-Rest: ${rest_auth_key}" ` +
-      `-H "Tus-Resumable: 1.0.0" ` +
-      `-H "Content-Type: application/offset+octet-stream" ` +
-      `-H "Upload-Offset: 0" ` +
-      `--data-binary "@${filePath}"`,
-    { stdio: "inherit" }
-  );
-
-  console.log(`Uploaded ${fileName} (${(fileSize / 1024 / 1024).toFixed(1)} MB)`);
-}
-
-function prepareStaging() {
-  if (existsSync(STAGING)) rmSync(STAGING, { recursive: true, force: true });
-  execSync(`mkdir -p "${STAGING}"`, { stdio: "inherit" });
-
-  execSync(`cp "${path.join(ROOT, "server.js")}" "${STAGING}/server.js"`, { stdio: "inherit" });
-  execSync(`cp -r "${path.join(ROOT, ".next/standalone")}" "${path.join(STAGING, ".next")}"`, {
-    stdio: "inherit",
-  });
-
-  writeFileSync(
-    path.join(STAGING, "package.json"),
-    JSON.stringify(
-      {
-        name: "kelvinoz-ai",
-        version: "1.0.0",
-        private: true,
-        scripts: {
-          prebuilt: "echo Deployed standalone build",
-          start: "node server.js",
-        },
-      },
-      null,
-      2
-    )
-  );
-}
-
-async function main() {
-  console.log("Building standalone Next.js app…");
-  execSync("npm run build", { cwd: ROOT, stdio: "inherit" });
-
-  console.log("Preparing clean deploy package…");
-  prepareStaging();
-
+function createArchive() {
   const zipPath = path.join(ROOT, ARCHIVE);
   if (existsSync(zipPath)) rmSync(zipPath);
 
-  console.log("Creating archive…");
-  execSync(`cd "${STAGING}" && zip -r "${zipPath}" . -x "*.git*"`, { stdio: "inherit" });
+  console.log("Packaging KelvinOz AI…");
+  execSync(
+    `cd "${DEPLOY_DIR}" && zip -r "${zipPath}" . -x "node_modules/*" -x "package-lock.json"`,
+    { stdio: "inherit" }
+  );
 
-  console.log("Getting upload URL…");
-  const uploadInfo = await api("/api/hosting/v1/files/upload-urls", {
-    method: "POST",
-    body: JSON.stringify({
-      username: USERNAME,
-      domain: DOMAIN,
-      files: [{ name: ARCHIVE, path: "/" }],
-    }),
-  });
+  const sizeKb = statSync(zipPath).size / 1024;
+  console.log(`Archive: ${ARCHIVE} (${sizeKb.toFixed(0)} KB)`);
+  return zipPath;
+}
 
-  console.log("Uploading (replaces old files)…");
-  uploadViaCurl(zipPath, uploadInfo);
+async function deployFromArchive(zipPath) {
+  console.log("Uploading archive and starting Node.js build (single-step)…");
 
-  console.log("Deploying archive to kelvinoz-live…");
-  await api(`/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/deploy`, {
-    method: "POST",
-    body: JSON.stringify({ archive_path: ARCHIVE }),
-  });
+  const archiveBytes = readFileSync(zipPath);
+  const form = new FormData();
+  form.append("archive", new Blob([archiveBytes]), ARCHIVE);
+  form.append("node_version", "18");
+  form.append("app_type", "express");
+  form.append("entry_file", "server.js");
+  form.append("build_script", "build");
+  form.append("root_directory", "/");
 
-  console.log("Waiting for extraction…");
-  await new Promise((r) => setTimeout(r, 20000));
-
-  console.log("Triggering Node.js build…");
-  const build = await api(
-    `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds`,
+  const res = await fetch(
+    `${BASE}/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds/from-archive`,
     {
       method: "POST",
-      body: JSON.stringify({
-        node_version: 20,
-        app_type: "express",
-        root_directory: "kelvinoz-live",
-        build_script: "prebuilt",
-        entry_file: "server.js",
-        source_type: "archive",
-        source_options: { archive_path: ARCHIVE },
-      }),
+      headers: { Authorization: `Bearer ${API_KEY}` },
+      body: form,
     }
   );
 
-  console.log("Build:", build.uuid, build.state);
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { message: text };
+  }
 
-  console.log("Clearing cache…");
+  if (!res.ok) {
+    throw new Error(data.message || data.error || `Build start failed: ${text.slice(0, 500)}`);
+  }
+
+  return data.uuid || data.data?.uuid || data;
+}
+
+async function waitForBuild(buildUuid) {
+  console.log("Build ID:", buildUuid);
+
+  for (let i = 0; i < 30; i++) {
+    await new Promise((r) => setTimeout(r, 10000));
+
+    const builds = await api(
+      `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds?per_page=5`
+    );
+    const build = builds.data?.find((b) => b.uuid === buildUuid) || builds.data?.[0];
+    const state = build?.state || "unknown";
+    console.log(`  Status: ${state}`);
+
+    if (state === "completed") return build;
+    if (state === "failed") {
+      const logs = await api(
+        `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/builds/${buildUuid}/logs`
+      ).catch(() => null);
+      const logText = logs?.data?.map((l) => l.line || l).join("\n") || logs?.logs || JSON.stringify(logs);
+      throw new Error(`Build failed.\n${logText || "No logs returned."}`);
+    }
+  }
+
+  throw new Error("Build timed out after 5 minutes");
+}
+
+async function main() {
+  if (!existsSync(DEPLOY_DIR)) {
+    throw new Error("deploy/ folder missing — run from repo root");
+  }
+
+  const zipPath = createArchive();
+  const buildUuid = await deployFromArchive(zipPath);
+  await waitForBuild(buildUuid);
+
   await api(
     `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/cache/clear`,
     { method: "DELETE" }
   ).catch(() => {});
 
-  console.log("Restarting server…");
   await api(
     `/api/hosting/v1/accounts/${USERNAME}/websites/${DOMAIN}/nodejs/server/restart`,
     { method: "POST", body: JSON.stringify({}) }
-  );
+  ).catch(() => {});
 
-  rmSync(STAGING, { recursive: true, force: true });
-  console.log("Done! Visit https://kelvinoz.com — access code required.");
+  console.log("Live at https://kelvinoz.com — access code: @535846.oZ");
 }
 
 main().catch((err) => {
