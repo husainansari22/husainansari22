@@ -12,7 +12,6 @@ const attachmentsEl = document.getElementById("attachments");
 const errorEl = document.getElementById("error");
 const welcomeEl = document.getElementById("welcome");
 const convListEl = document.getElementById("conversations");
-const titleEl = document.getElementById("chat-title");
 const sidebarEl = document.getElementById("sidebar");
 const overlayEl = document.getElementById("overlay");
 const filesPanel = document.getElementById("files-panel");
@@ -25,7 +24,6 @@ function save() {
   try {
     localStorage.setItem("kelvinoz_chats", JSON.stringify(conversations));
   } catch {
-    // storage full — drop old attachment blobs
     conversations = conversations.map((c) => ({
       ...c,
       messages: (c.messages || []).map((m) => ({
@@ -59,9 +57,7 @@ function escapeHtml(text) {
 
 function formatMarkdown(text) {
   let html = escapeHtml(text);
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
-    return `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`;
-  });
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => `<pre><code class="lang-${lang}">${code.trim()}</code></pre>`);
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   html = html.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   html = html.replace(/\n/g, "<br>");
@@ -100,54 +96,55 @@ function mergeFiles(conv, newFiles) {
 
 function openSidebar() {
   sidebarEl.classList.add("open");
-  sidebarEl.setAttribute("aria-hidden", "false");
   overlayEl.classList.add("show");
-  overlayEl.setAttribute("aria-hidden", "false");
 }
 
 function closeSidebar() {
   sidebarEl.classList.remove("open");
-  sidebarEl.setAttribute("aria-hidden", "true");
   overlayEl.classList.remove("show");
-  overlayEl.setAttribute("aria-hidden", "true");
+}
+
+function startNewChat() {
+  activeId = null;
+  closeSidebar();
+  filesPanel.hidden = true;
+  render();
+  inputEl.focus();
 }
 
 function renderFilesPanel() {
   const conv = getActive();
   if (!conv) {
-    filesPanel.hidden = true;
     filesToggle.hidden = true;
     return;
   }
   ensureConvFields(conv);
-  const count = conv.files.length;
-  filesToggle.hidden = count === 0;
-  filesCount.textContent = String(count);
+  filesToggle.hidden = conv.files.length === 0;
+  filesCount.textContent = String(conv.files.length);
 
   filesList.innerHTML = conv.files.length
     ? conv.files
         .map(
           (f) => `
       <div class="file-item" data-id="${f.id}">
-        <div class="file-icon">${(f.language || "file").slice(0, 2).toUpperCase()}</div>
+        <div class="file-icon">${(f.language || "f").slice(0, 2).toUpperCase()}</div>
         <div class="file-info">
           <span class="file-name">${escapeHtml(f.filename)}</span>
           <span class="file-meta">${f.lines || (f.content || "").split("\n").length} lines</span>
         </div>
-        <button type="button" class="file-dl" data-id="${f.id}" title="Download">↓</button>
+        <button type="button" class="file-dl" data-id="${f.id}">↓</button>
       </div>`
         )
         .join("")
-    : `<p class="files-empty">No files yet — ask the AI to build something</p>`;
+    : `<p class="files-empty">No files in this chat yet</p>`;
 
   filesList.querySelectorAll(".file-dl").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const file = conv.files.find((f) => f.id === btn.dataset.id);
       if (!file) return;
-      const blob = new Blob([file.content || ""], { type: "text/plain" });
       const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
+      a.href = URL.createObjectURL(new Blob([file.content || ""], { type: "text/plain" }));
       a.download = (file.filename || "file").split("/").pop();
       a.click();
     });
@@ -157,11 +154,11 @@ function renderFilesPanel() {
 function renderConversations() {
   convListEl.innerHTML = conversations
     .map(
-      (c) =>
-        `<button type="button" class="conv-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
-          <span class="conv-title">${escapeHtml(c.title || "New chat")}</span>
-          ${c.files?.length ? `<span class="conv-files">${c.files.length}</span>` : ""}
-        </button>`
+      (c) => `
+    <button type="button" class="conv-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
+      <span class="conv-title">${escapeHtml(c.title || "New chat")}</span>
+      ${c.files?.length ? `<span class="conv-files">${c.files.length}</span>` : ""}
+    </button>`
     )
     .join("");
   convListEl.querySelectorAll(".conv-item").forEach((el) => {
@@ -171,6 +168,18 @@ function renderConversations() {
       render();
     });
   });
+}
+
+function actionIcons() {
+  return `
+    <div class="msg-actions">
+      <button type="button" class="act-copy" title="Copy">⧉</button>
+      <button type="button" title="Share">↗</button>
+      <button type="button" title="Listen">🔊</button>
+      <button type="button" title="Good">👍</button>
+      <button type="button" title="Bad">👎</button>
+      <button type="button" title="More">⋯</button>
+    </div>`;
 }
 
 function renderMessages() {
@@ -183,7 +192,7 @@ function renderMessages() {
   }
   welcomeEl.hidden = true;
 
-  conv.messages.forEach((m) => {
+  conv.messages.forEach((m, idx) => {
     if (m.role === "system") return;
     const div = document.createElement("div");
     div.className = `msg ${m.role}`;
@@ -193,17 +202,33 @@ function renderMessages() {
       inner += m.attachments
         .map((a) => {
           if (a.dataUrl && String(a.type || "").startsWith("image/"))
-            return `<img class="msg-image" src="${a.dataUrl}" alt="${escapeHtml(a.name || "image")}" />`;
+            return `<img class="msg-image" src="${a.dataUrl}" alt="" />`;
           return `<div class="msg-file-tag">📎 ${escapeHtml(a.name || "file")}</div>`;
         })
         .join("");
     }
-
     if (m.content) {
       inner += m.role === "assistant" ? formatMarkdown(m.content) : escapeHtml(m.content).replace(/\n/g, "<br>");
     }
 
-    div.innerHTML = `<div class="msg-content">${inner || '<span class="typing"><span></span><span></span><span></span></span>'}</div>`;
+    if (m.role === "assistant") {
+      div.innerHTML = `
+        <div class="msg-content">${inner || '<span class="typing"><span></span><span></span><span></span></span>'}</div>
+        ${m.content ? actionIcons() : ""}`;
+      const copyBtn = div.querySelector(".act-copy");
+      if (copyBtn) {
+        copyBtn.addEventListener("click", async () => {
+          try {
+            await navigator.clipboard.writeText(m.content || "");
+            copyBtn.textContent = "✓";
+            setTimeout(() => (copyBtn.textContent = "⧉"), 1000);
+          } catch {}
+        });
+      }
+    } else {
+      div.innerHTML = `<div class="msg-content">${inner}</div>`;
+    }
+
     messagesEl.appendChild(div);
   });
 
@@ -211,7 +236,7 @@ function renderMessages() {
     const last = conv.deployments[conv.deployments.length - 1];
     const log = document.createElement("div");
     log.className = "deploy-log";
-    log.innerHTML = `<strong>Deploy</strong> · ${escapeHtml(last.status)} · ${escapeHtml(last.message || "")}`;
+    log.textContent = `Deploy · ${last.status} · ${last.message || ""}`;
     messagesEl.appendChild(log);
   }
 
@@ -219,8 +244,6 @@ function renderMessages() {
 }
 
 function render() {
-  const conv = getActive();
-  titleEl.textContent = conv?.title || "KelvinOz AI";
   renderConversations();
   renderMessages();
   renderFilesPanel();
@@ -230,12 +253,8 @@ function showError(msg) {
   errorEl.textContent = msg;
   errorEl.hidden = false;
 }
-
 function hideError() {
   errorEl.hidden = true;
-  errorEl.style.background = "";
-  errorEl.style.borderColor = "";
-  errorEl.style.color = "";
 }
 
 function renderAttachmentPreviews() {
@@ -250,7 +269,7 @@ function renderAttachmentPreviews() {
       (a, i) => `
     <div class="att-preview">
       ${String(a.type || "").startsWith("image/") && a.dataUrl ? `<img src="${a.dataUrl}" alt="" />` : `<span>📎 ${escapeHtml(a.name)}</span>`}
-      <button type="button" data-i="${i}" class="att-remove" aria-label="Remove">✕</button>
+      <button type="button" data-i="${i}" class="att-remove">✕</button>
     </div>`
     )
     .join("");
@@ -278,28 +297,16 @@ function readFileAsAttachment(file) {
       });
     };
     reader.onerror = reject;
-    if (String(file.type || "").startsWith("image/") || String(file.type || "").startsWith("video/")) {
-      reader.readAsDataURL(file);
-    } else {
-      reader.readAsText(file);
-    }
+    if (String(file.type || "").startsWith("image/") || String(file.type || "").startsWith("video/")) reader.readAsDataURL(file);
+    else reader.readAsText(file);
   });
-}
-
-function sanitizeMessagesForApi(messages) {
-  return messages
-    .filter((m) => m && (m.role === "user" || m.role === "assistant") && m.content)
-    .map((m) => {
-      if (typeof m.content === "string") return { role: m.role, content: m.content };
-      return { role: m.role, content: m.content };
-    });
 }
 
 function buildApiMessages(conv, userText, attachments) {
   const prior = conv.messages
     .slice(0, -2)
     .filter((m) => m.role === "user" || m.role === "assistant")
-    .filter((m) => typeof m.content === "string" && m.content.trim().length > 0)
+    .filter((m) => typeof m.content === "string" && m.content.trim())
     .map(({ role, content }) => ({ role, content }));
 
   const hasImages = attachments.some((a) => String(a.type || "").startsWith("image/") && a.dataUrl);
@@ -309,18 +316,14 @@ function buildApiMessages(conv, userText, attachments) {
       if (a.text) text += `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}`;
       else text += `\n\n[Attached: ${a.name}]`;
     }
-    return sanitizeMessagesForApi([...prior, { role: "user", content: text }]);
+    return [...prior, { role: "user", content: text }];
   }
 
   const parts = [{ type: "text", text: userText }];
   for (const a of attachments) {
-    if (String(a.type || "").startsWith("image/") && a.dataUrl) {
-      parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
-    } else if (a.text) {
-      parts.push({ type: "text", text: `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}` });
-    } else {
-      parts.push({ type: "text", text: `\n\n[Attached: ${a.name}]` });
-    }
+    if (String(a.type || "").startsWith("image/") && a.dataUrl) parts.push({ type: "image_url", image_url: { url: a.dataUrl } });
+    else if (a.text) parts.push({ type: "text", text: `\n\n[File: ${a.name}]\n${a.text.slice(0, 12000)}` });
+    else parts.push({ type: "text", text: `\n\n[Attached: ${a.name}]` });
   }
   return [...prior, { role: "user", content: parts }];
 }
@@ -332,7 +335,6 @@ function applyStreamEvent(evt, conv, state) {
     renderMessages();
     return;
   }
-  // Back-compat with raw OpenAI chunks
   if (evt.choices?.[0]?.delta?.content) {
     state.full += evt.choices[0].delta.content;
     conv.messages[conv.messages.length - 1].content = state.full;
@@ -347,14 +349,12 @@ function applyStreamEvent(evt, conv, state) {
   }
   if (evt.type === "deploy") {
     ensureConvFields(conv);
-    conv.deployments.push({ status: evt.status, message: evt.message, at: Date.now() });
+    conv.deployments.push({ status: evt.status, message: evt.message, domain: evt.domain, at: Date.now() });
     save();
     renderMessages();
     return;
   }
-  if (evt.type === "error") {
-    throw new Error(typeof evt.error === "string" ? evt.error : JSON.stringify(evt.error));
-  }
+  if (evt.type === "error") throw new Error(typeof evt.error === "string" ? evt.error : JSON.stringify(evt.error));
 }
 
 async function sendMessage(text) {
@@ -363,9 +363,8 @@ async function sendMessage(text) {
   hideError();
 
   if (!activeId) {
-    const conv = { id: uid(), title: "New chat", messages: [], files: [], deployments: [] };
-    conversations.unshift(conv);
-    activeId = conv.id;
+    conversations.unshift({ id: uid(), title: "New chat", messages: [], files: [], deployments: [] });
+    activeId = conversations[0].id;
   }
 
   const conv = getActive();
@@ -374,14 +373,10 @@ async function sendMessage(text) {
   pendingAttachments = [];
   renderAttachmentPreviews();
 
-  const displayText =
-    trimmed || (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
+  const displayText = trimmed || (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
   conv.messages.push({ role: "user", content: displayText, attachments, createdAt: Date.now() });
   conv.messages.push({ role: "assistant", content: "", createdAt: Date.now() });
-
-  if (conv.messages.filter((m) => m.role === "user").length === 1) {
-    conv.title = displayText.slice(0, 48);
-  }
+  if (conv.messages.filter((m) => m.role === "user").length === 1) conv.title = displayText.slice(0, 48);
   save();
   render();
 
@@ -391,13 +386,11 @@ async function sendMessage(text) {
   sendBtn.disabled = true;
 
   try {
-    const payload = { messages: buildApiMessages(conv, displayText, attachments) };
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ messages: buildApiMessages(conv, displayText, attachments) }),
     });
-
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error || `Error ${res.status}`);
@@ -414,7 +407,6 @@ async function sendMessage(text) {
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
-
       for (const line of lines) {
         if (!line.startsWith("data:")) continue;
         const raw = line.slice(5).trim();
@@ -429,10 +421,7 @@ async function sendMessage(text) {
       }
     }
 
-    if (!state.full.trim()) {
-      throw new Error("No response from AI. Try again.");
-    }
-
+    if (!state.full.trim()) throw new Error("No response from AI. Try again.");
     const extracted = extractFilesFromContent(state.full);
     if (extracted.length) mergeFiles(conv, extracted);
     save();
@@ -448,7 +437,6 @@ async function sendMessage(text) {
   } finally {
     isLoading = false;
     sendBtn.disabled = false;
-    inputEl.focus();
   }
 }
 
@@ -464,11 +452,8 @@ function onTap(el, handler) {
 onTap(menuBtn, openSidebar);
 onTap(document.getElementById("sidebar-close"), closeSidebar);
 onTap(overlayEl, closeSidebar);
-onTap(document.getElementById("new-chat"), () => {
-  activeId = null;
-  closeSidebar();
-  render();
-});
+onTap(document.getElementById("new-chat"), startNewChat);
+onTap(document.getElementById("new-chat-side"), startNewChat);
 onTap(document.getElementById("logout"), async () => {
   await fetch("/api/logout", { method: "POST" });
   location.href = "/login";
@@ -479,9 +464,7 @@ onTap(filesToggle, () => {
 onTap(document.getElementById("files-close"), () => {
   filesPanel.hidden = true;
 });
-onTap(attachBtn, () => {
-  fileInput.click();
-});
+onTap(attachBtn, () => fileInput.click());
 onTap(sendBtn, () => sendMessage(inputEl.value));
 
 fileInput.addEventListener("change", async (e) => {
@@ -502,10 +485,10 @@ inputEl.addEventListener("keydown", (e) => {
 });
 inputEl.addEventListener("input", () => {
   inputEl.style.height = "auto";
-  inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + "px";
+  inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
 });
 
-document.querySelectorAll(".suggestion").forEach((btn) => {
+document.querySelectorAll(".chip").forEach((btn) => {
   onTap(btn, () => sendMessage(btn.dataset.prompt));
 });
 
