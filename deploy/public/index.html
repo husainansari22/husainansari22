@@ -2,43 +2,57 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>KelvinOz AI — Uncensored Coding Assistant</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#09090b" />
+  <title>KelvinOz AI</title>
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
   <div class="app">
-    <aside class="sidebar">
+    <div id="overlay" class="overlay" hidden></div>
+
+    <aside id="sidebar" class="sidebar">
       <div class="sidebar-header">
         <div class="logo-sm">✦</div>
         <div>
           <strong>KelvinOz AI</strong>
-          <span>kelvinoz.com · Uncensored</span>
+          <span>kelvinoz.com</span>
         </div>
       </div>
       <button id="new-chat" class="btn-new">+ New Chat</button>
       <div id="conversations" class="conversations"></div>
       <div class="sidebar-footer">
+        <button id="deploy-btn" class="btn-deploy">Deploy to kelvinoz.com</button>
         <button id="logout">Log out</button>
       </div>
     </aside>
 
     <main class="main">
       <header class="header">
+        <button id="menu-btn" class="icon-btn" aria-label="Menu">☰</button>
         <h2 id="chat-title">KelvinOz AI</h2>
-        <span class="model-tag">gpt-4o · Uncensored</span>
+        <button id="files-toggle" class="icon-btn files-badge" aria-label="Files" hidden>
+          <span id="files-count">0</span>
+        </button>
       </header>
+
+      <div id="files-panel" class="files-panel" hidden>
+        <div class="files-panel-header">
+          <strong>Project files</strong>
+          <button id="files-close" class="icon-btn-sm">✕</button>
+        </div>
+        <div id="files-list" class="files-list"></div>
+      </div>
 
       <div id="messages" class="messages">
         <div id="welcome" class="welcome">
           <div class="welcome-icon">✦</div>
           <h1>Code anything.</h1>
-          <p>Uncensored, unrestricted coding assistant. No limits.</p>
+          <p>Uncensored AI · Deploy to kelvinoz.com · No limits</p>
           <div class="suggestions">
-            <button class="suggestion" data-prompt="Build a complete React todo app with localStorage">Build a React todo app with localStorage</button>
-            <button class="suggestion" data-prompt="Write a Node.js Express API with JWT auth">Write a Node.js Express API with JWT</button>
-            <button class="suggestion" data-prompt="Create a PostgreSQL schema for e-commerce">Create a PostgreSQL e-commerce schema</button>
-            <button class="suggestion" data-prompt="Explain async/await vs Promises with examples">Explain async/await vs Promises</button>
+            <button class="suggestion" data-prompt="Build a React landing page and save all files">Build a React landing page</button>
+            <button class="suggestion" data-prompt="Write a Node.js API with auth and save the files">Write a Node.js API with auth</button>
+            <button class="suggestion" data-prompt="Deploy the latest changes to kelvinoz.com">Deploy to kelvinoz.com</button>
           </div>
         </div>
       </div>
@@ -46,7 +60,10 @@
       <div id="error" class="error-bar" hidden></div>
 
       <div class="input-area">
+        <div id="attachments" class="attachments" hidden></div>
         <div class="input-box">
+          <button id="attach-btn" class="attach-btn" aria-label="Attach file">+</button>
+          <input id="file-input" type="file" accept="image/*,video/*,.txt,.js,.ts,.tsx,.jsx,.py,.json,.md,.css,.html,.zip,.pdf" multiple hidden />
           <textarea id="input" rows="1" placeholder="Ask anything — code, debug, build… no limits"></textarea>
           <button id="send" aria-label="Send">↑</button>
         </div>

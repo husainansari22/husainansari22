@@ -80,6 +80,7 @@ function createArchive() {
   const runtimeConfigPath = path.join(DEPLOY_DIR, "runtime-config.json");
   const runtimeConfig = {};
   if (process.env.OPENAI_API_KEY) runtimeConfig.openaiApiKey = process.env.OPENAI_API_KEY;
+  if (process.env.HOSTINGER_API_KEY) runtimeConfig.hostingerApiKey = process.env.HOSTINGER_API_KEY;
   if (process.env.ACCESS_CODE) runtimeConfig.accessCode = process.env.ACCESS_CODE;
   writeFileSync(runtimeConfigPath, JSON.stringify(runtimeConfig, null, 2));
 
