@@ -1120,11 +1120,56 @@ function resizeInput() {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + "px";
 }
 
-function pinApp() {
+function scrollMessagesToBottom() {
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function syncViewport() {
   const vv = window.visualViewport;
-  if (!vv) return;
   const app = document.getElementById("app");
-  app.style.height = vv.height + "px";
+  if (!app) return;
+
+  if (!vv || window.matchMedia("(min-width: 960px)").matches) {
+    app.style.height = "";
+    app.style.transform = "";
+    document.body.classList.remove("keyboard-open");
+    return;
+  }
+
+  const offsetTop = vv.offsetTop || 0;
+  app.style.height = `${vv.height}px`;
+  app.style.transform = `translateY(${offsetTop}px)`;
+
+  const keyboardOpen = window.innerHeight - vv.height - offsetTop > 60;
+  document.body.classList.toggle("keyboard-open", keyboardOpen);
+}
+
+function resetDocumentScroll() {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
+function onComposerFocus() {
+  resetDocumentScroll();
+  syncViewport();
+  scrollMessagesToBottom();
+  requestAnimationFrame(() => {
+    resetDocumentScroll();
+    syncViewport();
+    scrollMessagesToBottom();
+  });
+  setTimeout(() => {
+    resetDocumentScroll();
+    syncViewport();
+    scrollMessagesToBottom();
+  }, 120);
+  setTimeout(syncViewport, 320);
+}
+
+function onComposerBlur() {
+  document.body.classList.remove("keyboard-open");
+  syncViewport();
 }
 
 async function sendMessage() {
@@ -1365,6 +1410,8 @@ attachBtn.addEventListener("click", (e) => {
 });
 fileInput.addEventListener("change", () => addFiles(fileInput.files));
 inputEl.addEventListener("input", resizeInput);
+inputEl.addEventListener("focus", onComposerFocus);
+inputEl.addEventListener("blur", onComposerBlur);
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault();
@@ -1419,11 +1466,13 @@ promptNameEl.addEventListener("keydown", (e) => {
 });
 
 if (window.visualViewport) {
-  window.visualViewport.addEventListener("resize", pinApp);
-  window.visualViewport.addEventListener("scroll", pinApp);
-  pinApp();
+  window.visualViewport.addEventListener("resize", syncViewport);
+  window.visualViewport.addEventListener("scroll", syncViewport);
 }
+window.addEventListener("resize", syncViewport);
+window.addEventListener("orientationchange", () => setTimeout(syncViewport, 250));
 
 load();
 render();
-inputEl.focus();
+syncViewport();
+if (!window.matchMedia("(pointer: coarse)").matches) inputEl.focus();
