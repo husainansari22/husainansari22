@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0c0f" />
+  <title>KelvinOz AI</title>
+  <link rel="stylesheet" href="/styles.css?v=16" />
+</head>
+<body>
+  <div id="overlay" class="overlay" hidden></div>
+
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="sidebar-top">
+      <strong class="sidebar-brand">KelvinOz AI</strong>
+      <button type="button" id="sidebar-search" class="icon-btn" aria-label="Search" title="Search">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <button type="button" class="nav-item" id="nav-system-prompt">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v14H4z"/><path d="M8 9h8M8 13h6"/></svg>
+        <span>System Prompt</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="library">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 19a2 2 0 0 0 2 2h12"/><path d="M6 3h12v16H6z"/><path d="M10 3v16"/></svg>
+        <span>Library</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="projects">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+        <span>Projects</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="plugins">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+        <span>Plugins</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="codex">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 18a5 5 0 1 1 2-9.6A6 6 0 0 1 20 12a4 4 0 0 1-1 7.9H7z"/><circle cx="12" cy="13" r="2"/><path d="M12 11v-1"/></svg>
+        <span>Codex</span>
+      </button>
+      <button type="button" class="nav-item" data-nav="images">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 20l6-8 4 5 3-4 3 7H4z"/><path d="M14 7l2-3 2 3"/><path d="M12 10v7"/></svg>
+        <span>Images</span>
+      </button>
+    </nav>
+
+    <div class="recents-head">Recents</div>
+    <div id="recents" class="recents"></div>
+
+    <div class="sidebar-bottom">
+      <button type="button" id="new-chat" class="chat-pill">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        New chat
+      </button>
+      <button type="button" id="open-settings" class="icon-btn" aria-label="Settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.2.6.7 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <div id="app" class="app">
+    <header class="topbar">
+      <button type="button" id="menu-btn" class="icon-btn" aria-label="Menu">
+        <span class="burger"><i></i><i></i></span>
+      </button>
+      <div class="top-center">
+        <select id="model-select" class="model-select" aria-label="Model">
+          <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+          <option value="gemini-3.5-flash">Gemini 3.5 Flash</option>
+          <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro</option>
+          <option value="deepseek-v4-flash">DeepSeek V4 Flash</option>
+          <option value="qwen-3.6-uncensored">Qwen 3.6</option>
+          <option value="grok-4.5">Grok 4.5</option>
+          <option value="kimi-k2.7-code">Kimi K2.7 Code</option>
+          <option value="glm-5v-turbo">GLM 5V Turbo</option>
+        </select>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="new-chat-top" class="icon-btn" aria-label="New chat">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+        <button type="button" id="more-btn" class="icon-btn" aria-label="More">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M8 12h.01M12 12h.01M16 12h.01" stroke-width="2.6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <main id="messages" class="messages">
+      <div id="welcome" class="welcome">
+        <div class="welcome-orb">✦</div>
+        <h1>What can I help with?</h1>
+        <p>Chat, code, search the web, analyze files, and create images — your system prompt controls everything.</p>
+        <div class="chips">
+          <button type="button" class="chip" data-prompt="Explain quantum computing simply">Explain something</button>
+          <button type="button" class="chip" data-prompt="Write a clean Node.js API with auth">Write code</button>
+          <button type="button" class="chip" data-image="1">Create image</button>
+          <button type="button" class="chip" data-prompt="Summarize the latest AI news">Web research</button>
+        </div>
+      </div>
+    </main>
+
+    <div id="error" class="error" hidden></div>
+
+    <footer class="composer">
+      <div id="attach-previews" class="attach-previews" hidden></div>
+      <div class="composer-pill">
+        <button type="button" id="attach-btn" class="attach-btn" aria-label="Add photo, video, or file">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+        </button>
+        <button type="button" id="image-btn" class="tool-btn" aria-label="Create image" title="Create image">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-7 7"/></svg>
+        </button>
+        <input id="file-input" type="file" accept="image/*,video/*,.txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.css,.html,.csv,.pdf,.zip" multiple hidden />
+        <textarea id="input" rows="1" placeholder="Ask KelvinOz AI"></textarea>
+        <button type="button" id="send" class="send" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M5 12h11M12 5l7 7-7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <section id="settings" class="settings" aria-hidden="true">
+    <header class="settings-top">
+      <button type="button" id="settings-back" class="icon-btn" aria-label="Back">
+        <span style="font-size:1.4rem;line-height:1">&lt;</span>
+      </button>
+      <strong>KelvinOz AI</strong>
+      <span></span>
+    </header>
+
+    <div class="settings-body">
+      <label class="field-label" for="system-prompt">System Prompt</label>
+      <textarea
+        id="system-prompt"
+        class="system-prompt"
+        rows="6"
+        placeholder="You are a helpful assistant..."
+        spellcheck="false"
+      ></textarea>
+
+      <div class="prompt-save-row">
+        <input id="prompt-name" class="prompt-name" type="text" placeholder="Prompt name" maxlength="80" />
+        <button type="button" id="prompt-save" class="prompt-save-btn">Save</button>
+      </div>
+      <p id="prompt-hint" class="prompt-hint" hidden></p>
+
+      <div class="saved-prompts-head">Saved prompts</div>
+      <div id="saved-prompts" class="saved-prompts"></div>
+
+      <div class="toggles">
+        <label class="toggle">
+          <input type="checkbox" id="web-search" checked />
+          <span class="switch" aria-hidden="true"></span>
+          <span class="toggle-text">Web Search</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="nomask-prompt" checked />
+          <span class="switch" aria-hidden="true"></span>
+          <span class="toggle-text">NoMask Prompt</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="stream" checked />
+          <span class="switch" aria-hidden="true"></span>
+          <span class="toggle-text">Stream</span>
+        </label>
+      </div>
+    </div>
+  </section>
+
+  <section id="section-page" class="settings" aria-hidden="true">
+    <header class="settings-top">
+      <button type="button" id="section-back" class="icon-btn" aria-label="Back">
+        <span style="font-size:1.4rem;line-height:1">&lt;</span>
+      </button>
+      <strong id="section-title">Section</strong>
+      <button type="button" id="section-settings" class="icon-btn" aria-label="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9c.2.6.7 1 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      </button>
+    </header>
+    <div id="section-body" class="settings-body section-body"></div>
+  </section>
+
+  <div id="connect-modal" class="connect-modal" hidden>
+    <div class="connect-backdrop" id="connect-backdrop"></div>
+    <div class="connect-sheet" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+      <button type="button" id="connect-close" class="connect-x" aria-label="Close">×</button>
+      <div class="connect-logos">
+        <div class="connect-logo kelvinoz" aria-hidden="true">K</div>
+        <div class="connect-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="connect-logo plugin" id="connect-plugin-logo" aria-hidden="true">P</div>
+      </div>
+      <h2 id="connect-title">Connect plugin</h2>
+      <div class="connect-info">
+        <p><strong>You’re in control.</strong> KelvinOz AI respects your permissions. You can disconnect this app anytime.</p>
+        <p><strong>Apps may introduce elevated risk.</strong> Third-party apps can change over time. Review what you share before connecting.</p>
+        <p><strong>Data shared with this app:</strong> basic info needed for the connection, plus relevant chat context and intent so the plugin can help directly.</p>
+      </div>
+      <div id="connect-extra" class="connect-extra" hidden></div>
+      <button type="button" id="connect-continue" class="connect-continue">Continue</button>
+      <button type="button" id="connect-cancel" class="connect-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <script src="/plugins-data.js?v=16"></script>
+  <script src="/app.js?v=16"></script>
+</body>
+</html>
