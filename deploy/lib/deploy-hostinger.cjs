@@ -134,7 +134,10 @@ async function deployToHostinger(options = {}) {
   const deployDir = options.deployDir || path.join(__dirname, "..");
   const zipPath = path.join(deployDir, ARCHIVE);
   const runtimeConfig = {
-    openaiApiKey: options.openaiApiKey || process.env.OPENAI_API_KEY || "",
+    openaiApiKey: options.nomaskApiKey || options.openaiApiKey || process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY || "",
+    nomaskApiKey: options.nomaskApiKey || options.openaiApiKey || process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY || "",
+    nomaskBaseUrl: process.env.NOMASK_BASE_URL || "https://nomask.ai/api/v1",
+    nomaskModel: process.env.NOMASK_MODEL || "kimi-k2.7-code",
     hostingerApiKey: apiKey,
   };
 

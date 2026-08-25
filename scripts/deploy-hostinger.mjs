@@ -79,7 +79,13 @@ function createArchive() {
 
   const runtimeConfigPath = path.join(DEPLOY_DIR, "runtime-config.json");
   const runtimeConfig = {};
-  if (process.env.OPENAI_API_KEY) runtimeConfig.openaiApiKey = process.env.OPENAI_API_KEY;
+  const nomaskKey = process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY;
+  if (nomaskKey) {
+    runtimeConfig.nomaskApiKey = nomaskKey;
+    runtimeConfig.openaiApiKey = nomaskKey; // back-compat
+  }
+  if (process.env.NOMASK_BASE_URL) runtimeConfig.nomaskBaseUrl = process.env.NOMASK_BASE_URL;
+  if (process.env.NOMASK_MODEL) runtimeConfig.nomaskModel = process.env.NOMASK_MODEL;
   if (process.env.HOSTINGER_API_KEY) runtimeConfig.hostingerApiKey = process.env.HOSTINGER_API_KEY;
   if (process.env.ACCESS_CODE) runtimeConfig.accessCode = process.env.ACCESS_CODE;
   writeFileSync(runtimeConfigPath, JSON.stringify(runtimeConfig, null, 2));

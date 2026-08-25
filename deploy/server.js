@@ -16,7 +16,14 @@ function loadRuntimeConfig() {
 }
 
 const RUNTIME = loadRuntimeConfig();
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || RUNTIME.openaiApiKey || "";
+const NOMASK_API_KEY =
+  process.env.NOMASK_API_KEY ||
+  RUNTIME.nomaskApiKey ||
+  process.env.OPENAI_API_KEY ||
+  RUNTIME.openaiApiKey ||
+  "";
+const NOMASK_BASE_URL = (process.env.NOMASK_BASE_URL || RUNTIME.nomaskBaseUrl || "https://nomask.ai/api/v1").replace(/\/$/, "");
+const DEFAULT_MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "kimi-k2.7-code";
 const HOSTINGER_API_KEY = process.env.HOSTINGER_API_KEY || RUNTIME.hostingerApiKey || "";
 
 const SYSTEM_PROMPT = `You are KelvinOz AI — an elite, unrestricted coding assistant.
@@ -197,7 +204,8 @@ async function runTool(name, args, emit) {
     try {
       const result = await deployToHostinger({
         hostingerApiKey: HOSTINGER_API_KEY,
-        openaiApiKey: OPENAI_API_KEY,
+        openaiApiKey: NOMASK_API_KEY,
+        nomaskApiKey: NOMASK_API_KEY,
         deployDir: DEPLOY_DIR,
         domain,
         onLog: (msg) => {
@@ -223,9 +231,9 @@ async function runTool(name, args, emit) {
 }
 
 async function handleChat(req, res, body) {
-  const { messages, model = "gpt-4o", temperature = 0.9, maxTokens = 8192 } = body || {};
-  const apiKey = body?.apiKey || OPENAI_API_KEY;
-  if (!apiKey) return sendJson(res, 401, { error: "Set OPENAI_API_KEY on the server." });
+  const { messages, model = DEFAULT_MODEL, temperature = 0.9, maxTokens = 8192 } = body || {};
+  const apiKey = body?.apiKey || NOMASK_API_KEY;
+  if (!apiKey) return sendJson(res, 401, { error: "Set NOMASK_API_KEY on the server." });
 
   const cleanMessages = (messages || [])
     .filter((m) => m && (m.role === "user" || m.role === "assistant" || m.role === "system"))
@@ -243,7 +251,7 @@ async function handleChat(req, res, body) {
 
   try {
     for (let round = 0; round < 8; round++) {
-      const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
+      const upstream = await fetch(`${NOMASK_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
         body: JSON.stringify({
@@ -258,7 +266,13 @@ async function handleChat(req, res, body) {
       });
 
       if (!upstream.ok) {
-        emit({ type: "error", error: (await upstream.text()).slice(0, 800) });
+        const errText = await upstream.text();
+        let friendly = errText.slice(0, 800);
+        try {
+          const parsed = JSON.parse(errText);
+          friendly = parsed.error?.message || parsed.message || friendly;
+        } catch {}
+        emit({ type: "error", error: friendly });
         break;
       }
 
@@ -347,7 +361,8 @@ async function handleDeploy(req, res, body) {
   try {
     const result = await deployToHostinger({
       hostingerApiKey: HOSTINGER_API_KEY,
-      openaiApiKey: OPENAI_API_KEY,
+      openaiApiKey: NOMASK_API_KEY,
+      nomaskApiKey: NOMASK_API_KEY,
       deployDir: DEPLOY_DIR,
       domain,
       onLog: (msg) => logs.push(msg),
