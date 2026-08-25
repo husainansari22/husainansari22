@@ -25,6 +25,60 @@ const NOMASK_BASE_URL = (
 ).replace(/\/$/, "");
 const MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "deepseek-v4-pro";
 
+const IMAGE_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "generate_image",
+      description: "Generate an image from a text prompt and return an image URL the user can view.",
+      parameters: {
+        type: "object",
+        properties: {
+          prompt: { type: "string", description: "Detailed image prompt" },
+          width: { type: "number" },
+          height: { type: "number" },
+        },
+        required: ["prompt"],
+      },
+    },
+  },
+];
+
+async function generateImage(prompt, width = 1024, height = 1024) {
+  const clean = String(prompt || "").trim().slice(0, 500);
+  if (!clean) throw new Error("Image prompt is required");
+  const w = Math.min(1280, Math.max(256, Number(width) || 1024));
+  const h = Math.min(1280, Math.max(256, Number(height) || 1024));
+  const seed = Date.now() % 100000;
+  const url =
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(clean)}` +
+    `?width=${w}&height=${h}&nologo=true&model=flux&enhance=true&seed=${seed}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 90000);
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: { Accept: "image/*" },
+    });
+    if (!res.ok) throw new Error(`Image generation failed (${res.status})`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 1000) throw new Error("Image generation returned empty data");
+    const b64 = buf.toString("base64");
+    return {
+      url,
+      dataUrl: `data:image/jpeg;base64,${b64}`,
+      prompt: clean,
+      width: w,
+      height: h,
+    };
+  } catch (err) {
+    if (err.name === "AbortError") throw new Error("Image generation timed out");
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -167,6 +221,12 @@ async function runHostingerTool(name, args) {
 function buildSystemPrompt(userPrompt, plugins) {
   const parts = [];
   if (userPrompt) parts.push(userPrompt);
+  parts.push(
+    "You are KelvinOz AI — a modern multimodal assistant like ChatGPT or Gemini. " +
+      "Be clear, helpful, and direct. Use markdown when useful. " +
+      "You can generate images with the generate_image tool whenever the user asks for a picture, photo, illustration, logo, art, or visual. " +
+      "After generating, briefly describe the result. You can also use web search when enabled, analyze attached files/images, write and explain code, and use connected plugins."
+  );
   const list = Array.isArray(plugins) ? plugins : [];
   if (list.length) {
     parts.push("Enabled plugins:");
@@ -189,6 +249,8 @@ async function handleChat(req, res, body) {
   const stream = body?.stream !== false;
   const hostingerEnabled = plugins.some((p) => String(p.id || "").startsWith("hostinger"));
   const hostingerKey = String(body?.hostingerApiKey || HOSTINGER_API_KEY || "").trim();
+  const model = String(body?.model || MODEL).trim() || MODEL;
+  const tools = [...IMAGE_TOOLS, ...(hostingerEnabled ? HOSTINGER_TOOLS : [])];
 
   async function hostingerApiAuthed(endpoint, options = {}) {
     if (!hostingerKey) throw new Error("Connect Hostinger with an API token first");
@@ -256,6 +318,21 @@ async function handleChat(req, res, body) {
     }
   }
 
+  async function runAnyTool(name, args, emit) {
+    if (name === "generate_image") {
+      const img = await generateImage(args.prompt, args.width, args.height);
+      const slim = { url: img.url, prompt: img.prompt, dataUrl: img.dataUrl };
+      if (emit) emit({ type: "image", image: slim });
+      return JSON.stringify({
+        ok: true,
+        prompt: img.prompt,
+        url: img.url,
+        note: "Image generated. Tell the user the image is ready; the client will display it automatically from the tool result URL.",
+      });
+    }
+    return runHostingerToolAuthed(name, args);
+  }
+
   async function callNomask({ streamMode, withTools }) {
     return fetch(`${NOMASK_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -264,22 +341,23 @@ async function handleChat(req, res, body) {
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: MODEL,
+        model,
         messages: conversation,
         web_search: webSearch,
         nomask_roleplay: nomaskPrompt,
         stream: streamMode,
-        ...(withTools && hostingerEnabled ? { tools: HOSTINGER_TOOLS, tool_choice: "auto" } : {}),
+        ...(withTools ? { tools, tool_choice: "auto" } : {}),
       }),
     });
   }
 
   // Non-stream path
   if (!stream) {
+    const collectedImages = [];
     let rounds = 0;
     while (rounds < 4) {
       rounds += 1;
-      const upstream = await callNomask({ streamMode: false, withTools: hostingerEnabled });
+      const upstream = await callNomask({ streamMode: false, withTools: true });
       const text = await upstream.text();
       let data;
       try {
@@ -294,7 +372,7 @@ async function handleChat(req, res, body) {
       }
       const message = data.choices?.[0]?.message || {};
       const toolCalls = message.tool_calls || [];
-      if (hostingerEnabled && toolCalls.length) {
+      if (toolCalls.length) {
         conversation.push({
           role: "assistant",
           content: message.content || null,
@@ -305,7 +383,9 @@ async function handleChat(req, res, body) {
           try {
             args = JSON.parse(tc.function?.arguments || "{}");
           } catch {}
-          const result = await runHostingerToolAuthed(tc.function?.name, args);
+          const result = await runAnyTool(tc.function?.name, args, (evt) => {
+            if (evt?.type === "image" && evt.image) collectedImages.push(evt.image);
+          });
           conversation.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -314,51 +394,66 @@ async function handleChat(req, res, body) {
         }
         continue;
       }
-      return sendJson(res, 200, { content: message.content || "" });
+      return sendJson(res, 200, {
+        content: message.content || "",
+        images: collectedImages,
+      });
     }
-    return sendJson(res, 200, { content: "" });
+    return sendJson(res, 200, { content: "", images: collectedImages });
   }
 
-  // Stream path (tools first non-stream if needed, then stream final)
-  if (hostingerEnabled) {
-    for (let round = 0; round < 4; round++) {
-      const upstreamTools = await callNomask({ streamMode: false, withTools: true });
-      const text = await upstreamTools.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        break;
-      }
-      if (!upstreamTools.ok) break;
-      const message = data.choices?.[0]?.message || {};
-      const toolCalls = message.tool_calls || [];
-      if (!toolCalls.length) {
-        if (message.content) {
-          res.writeHead(200, {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-          });
-          res.write(`data: ${JSON.stringify({ type: "content", delta: message.content })}\n\n`);
-          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-          return res.end();
-        }
-        break;
-      }
-      conversation.push({
-        role: "assistant",
-        content: message.content || null,
-        tool_calls: toolCalls,
+  // Stream path: resolve tools first, then stream final answer
+  const pendingImages = [];
+  for (let round = 0; round < 4; round++) {
+    const upstreamTools = await callNomask({ streamMode: false, withTools: true });
+    const text = await upstreamTools.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      break;
+    }
+    if (!upstreamTools.ok) {
+      return sendJson(res, upstreamTools.status, {
+        error: data.error?.message || data.message || `HTTP ${upstreamTools.status}`,
       });
-      for (const tc of toolCalls) {
-        let args = {};
-        try {
-          args = JSON.parse(tc.function?.arguments || "{}");
-        } catch {}
-        const result = await runHostingerToolAuthed(tc.function?.name, args);
-        conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
+    }
+    const message = data.choices?.[0]?.message || {};
+    const toolCalls = message.tool_calls || [];
+    if (!toolCalls.length) {
+      if (message.content && !pendingImages.length) {
+        // no tools — fall through to stream for nicer UX
+        break;
       }
+      if (message.content) {
+        res.writeHead(200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+        });
+        for (const image of pendingImages) {
+          res.write(`data: ${JSON.stringify({ type: "image", image })}\n\n`);
+        }
+        res.write(`data: ${JSON.stringify({ type: "content", delta: message.content })}\n\n`);
+        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+        return res.end();
+      }
+      break;
+    }
+    conversation.push({
+      role: "assistant",
+      content: message.content || null,
+      tool_calls: toolCalls,
+    });
+    for (const tc of toolCalls) {
+      let args = {};
+      try {
+        args = JSON.parse(tc.function?.arguments || "{}");
+      } catch {}
+      const result = await runAnyTool(tc.function?.name, args, (evt) => {
+        if (evt?.type === "image" && evt.image) pendingImages.push(evt.image);
+      });
+      conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
     }
   }
 
@@ -379,6 +474,10 @@ async function handleChat(req, res, body) {
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
   });
+
+  for (const image of pendingImages) {
+    res.write(`data: ${JSON.stringify({ type: "image", image })}\n\n`);
+  }
 
   const reader = upstream.body.getReader();
   const decoder = new TextDecoder();
@@ -435,6 +534,16 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       return await handleChat(req, res, body);
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (req.method === "POST" && pathname === "/api/image") {
+    try {
+      const body = await readBody(req);
+      const img = await generateImage(body?.prompt, body?.width, body?.height);
+      return sendJson(res, 200, img);
     } catch (err) {
       return sendJson(res, 500, { error: err.message });
     }

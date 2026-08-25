@@ -17,12 +17,16 @@ const streamEl = document.getElementById("stream");
 const attachBtn = document.getElementById("attach-btn");
 const fileInput = document.getElementById("file-input");
 const attachPreviews = document.getElementById("attach-previews");
+const modelSelect = document.getElementById("model-select");
+const imageBtn = document.getElementById("image-btn");
+const welcomeEl = document.getElementById("welcome");
 
 const STORE_KEY = "kelvinoz_chats_v2";
 const SETTINGS_KEY = "kelvinoz_settings_v2";
 const PROMPTS_KEY = "kelvinoz_saved_prompts_v1";
 const PLUGINS_KEY = "kelvinoz_connected_plugins_v2";
 const PROJECTS_KEY = "kelvinoz_projects_v1";
+const MODEL_KEY = "kelvinoz_model_v1";
 
 let conversations = [];
 let activeId = null;
@@ -36,6 +40,7 @@ let projects = [];
 let currentSection = null;
 let pluginQuery = "";
 let pendingConnectId = null;
+let imageMode = false;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -201,6 +206,16 @@ function load() {
     if (typeof s.stream === "boolean") streamEl.checked = s.stream;
     if (typeof s.activePromptId === "string") activePromptId = s.activePromptId;
   } catch {}
+  const savedModel = localStorage.getItem(MODEL_KEY);
+  if (modelSelect && savedModel) {
+    if (![...modelSelect.options].some((o) => o.value === savedModel)) {
+      const opt = document.createElement("option");
+      opt.value = savedModel;
+      opt.textContent = savedModel;
+      modelSelect.appendChild(opt);
+    }
+    modelSelect.value = savedModel;
+  }
   if (!conversations.length) newChat(false);
   else activeId = conversations[0].id;
   loadExtra();
@@ -208,8 +223,53 @@ function load() {
   renderSavedPrompts();
 }
 
+function slimForStorage(convs) {
+  return convs.map((c) => ({
+    ...c,
+    messages: (c.messages || []).map((m) => {
+      const next = { ...m };
+      if (next.images?.length) {
+        next.images = next.images.map((img) => ({
+          url: img.url,
+          prompt: img.prompt,
+          // Keep tiny data URLs only; drop huge base64 to avoid quota blowups
+          dataUrl:
+            typeof img.dataUrl === "string" && img.dataUrl.length < 8000 ? img.dataUrl : undefined,
+        }));
+      }
+      if (next.attachments?.length) {
+        next.attachments = next.attachments.map((f) => {
+          if (f.kind === "image" || f.kind === "video") return f;
+          const { dataUrl, ...rest } = f;
+          return rest;
+        });
+      }
+      delete next.apiAttachments;
+      return next;
+    }),
+  }));
+}
+
 function save() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(conversations));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(slimForStorage(conversations)));
+  } catch {
+    // Quota exceeded — drop generated dataUrls and retry once
+    for (const c of conversations) {
+      for (const m of c.messages || []) {
+        if (m.images) {
+          m.images = m.images.map((img) => ({ url: img.url, prompt: img.prompt }));
+        }
+      }
+    }
+    localStorage.setItem(STORE_KEY, JSON.stringify(slimForStorage(conversations)));
+  }
+}
+
+function setImageMode(on) {
+  imageMode = !!on;
+  if (imageBtn) imageBtn.classList.toggle("active", imageMode);
+  inputEl.placeholder = imageMode ? "Describe the image to generate…" : "Ask KelvinOz AI";
 }
 
 function saveSettings() {
@@ -727,16 +787,33 @@ function renderImages(body) {
   for (const c of conversations) {
     for (const m of c.messages || []) {
       for (const f of m.attachments || []) {
-        if ((f.kind === "image" || f.kind === "video") && f.dataUrl) {
-          images.push({ ...f, chatId: c.id, title: c.title || "New chat" });
+        if ((f.kind === "image" || f.kind === "video") && (f.dataUrl || f.url)) {
+          images.push({
+            ...f,
+            src: f.dataUrl || f.url,
+            chatId: c.id,
+            title: c.title || "New chat",
+          });
+        }
+      }
+      for (const img of m.images || []) {
+        if (img.dataUrl || img.url) {
+          images.push({
+            kind: "image",
+            name: img.prompt || "Generated",
+            src: img.dataUrl || img.url,
+            chatId: c.id,
+            title: c.title || "New chat",
+          });
         }
       }
     }
   }
 
   body.innerHTML = `
-    <div class="project-form">
-      <button type="button" id="images-upload" style="width:100%;padding:12px">Add photos or videos</button>
+    <div class="project-form" style="display:flex;gap:8px">
+      <button type="button" id="images-create" style="flex:1;padding:12px">Create image</button>
+      <button type="button" id="images-upload" style="flex:1;padding:12px">Upload</button>
     </div>
     <div class="section-group">Gallery</div>
     <div id="section-list" class="image-grid"></div>
@@ -746,18 +823,23 @@ function renderImages(body) {
     closeSection();
     fileInput.click();
   });
+  body.querySelector("#images-create").addEventListener("click", () => {
+    closeSection();
+    setImageMode(true);
+    inputEl.focus();
+  });
 
   const listEl = body.querySelector("#section-list");
   if (!images.length) {
     listEl.className = "";
-    listEl.innerHTML = `<p class="section-empty">No images yet. Attach photos in chat or tap Add.</p>`;
+    listEl.innerHTML = `<p class="section-empty">No images yet. Create one or upload from chat.</p>`;
     return;
   }
   listEl.innerHTML = images
     .map((img) =>
       img.kind === "video"
-        ? `<video src="${img.dataUrl}" controls></video>`
-        : `<img src="${img.dataUrl}" alt="${escapeHtml(img.name || "image")}" data-open="${img.chatId}" />`
+        ? `<video src="${img.src}" controls></video>`
+        : `<img src="${img.src}" alt="${escapeHtml(img.name || "image")}" data-open="${img.chatId}" />`
     )
     .join("");
   listEl.querySelectorAll("[data-open]").forEach((el) => {
@@ -768,13 +850,36 @@ function renderImages(body) {
   });
 }
 
+function renderMarkdown(text) {
+  const escaped = escapeHtml(text || "");
+  return escaped
+    .replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code}</code></pre>`)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/^(?:- |\* )(.+)$/gm, "<li>$1</li>")
+    .replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>")
+    .replace(/\n\n/g, "</p><p>")
+    .replace(/\n/g, "<br/>");
+}
+
+function updateWelcome() {
+  const conv = getActive();
+  const hasMsgs = !!(conv && conv.messages && conv.messages.length);
+  if (welcomeEl) welcomeEl.hidden = hasMsgs;
+}
+
 function iconBtn(label, path) {
   return `<button type="button" class="msg-action" aria-label="${label}">${path}</button>`;
 }
 
 function renderMessages() {
   const conv = getActive();
+  const keepWelcome = welcomeEl;
   messagesEl.innerHTML = "";
+  if (keepWelcome) messagesEl.appendChild(keepWelcome);
+  updateWelcome();
   if (!conv || !conv.messages.length) return;
 
   for (const m of conv.messages) {
@@ -812,22 +917,37 @@ function renderMessages() {
         el.appendChild(text);
       }
     } else {
+      if (m.images?.length) {
+        for (const img of m.images) {
+          const src = img.dataUrl || img.url;
+          if (!src) continue;
+          const image = document.createElement("img");
+          image.className = "msg-image";
+          image.src = src;
+          image.alt = img.prompt || "Generated image";
+          image.loading = "lazy";
+          el.appendChild(image);
+        }
+      }
+      if (m.pending) {
+        const pending = document.createElement("div");
+        pending.className = "msg-pending";
+        pending.innerHTML = `<span class="dots"><i></i><i></i><i></i></span>${escapeHtml(m.pending)}`;
+        el.appendChild(pending);
+      }
       const text = document.createElement("div");
-      text.textContent = m.content || "";
+      text.className = "md";
+      if (m.content) text.innerHTML = `<p>${renderMarkdown(m.content)}</p>`;
       el.appendChild(text);
-      if (m.content) {
+      if (m.content || m.images?.length) {
         const actions = document.createElement("div");
         actions.className = "msg-actions";
         actions.innerHTML = [
           iconBtn("Copy", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4 16V6a2 2 0 0 1 2-2h10"/></svg>'),
-          iconBtn("Speak", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 10v4h4l5 4V6L7 10H3z"/><path d="M16 9a4 4 0 0 1 0 6"/></svg>'),
-          iconBtn("Dislike", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 15v5a2 2 0 0 0 2 2l5-6V3H7.5a2 2 0 0 0-2 1.7l-1 7A2 2 0 0 0 6.5 14H10z"/><path d="M17 3h3v10h-3"/></svg>'),
-          iconBtn("Share", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>'),
-          iconBtn("More", '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg>'),
         ].join("");
         const copyBtn = actions.querySelector('[aria-label="Copy"]');
         if (copyBtn) {
-          copyBtn.addEventListener("click", () => navigator.clipboard?.writeText(m.content || ""));
+          copyBtn.addEventListener("click", () => navigator.clipboard?.writeText(m.content || m.images?.[0]?.prompt || ""));
         }
         el.appendChild(actions);
       }
@@ -1019,11 +1139,15 @@ async function sendMessage() {
     conv = getActive();
   }
 
+  const wantImage =
+    imageMode ||
+    /^(generate|create|draw|make)\b.*\b(image|photo|picture|logo|illustration)\b/i.test(text) ||
+    /\b(generate an image|create an image|draw me|make a picture)\b/i.test(text);
+
   const displayText =
     text ||
     (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
 
-  // Store lighter attachment copies in chat history (keep dataUrl for images/videos preview)
   const storedAttachments = attachments.map((f) => ({
     id: f.id,
     name: f.name,
@@ -1032,17 +1156,27 @@ async function sendMessage() {
     dataUrl: f.kind === "image" || f.kind === "video" ? f.dataUrl : undefined,
   }));
 
+  const userText = wantImage && text && !/generate_image|image prompt/i.test(text)
+    ? `Generate an image: ${text}`
+    : text;
+
   conv.messages.push({
     role: "user",
-    content: text,
+    content: userText,
     attachments: storedAttachments,
     apiAttachments: attachments,
   });
   if (conv.messages.filter((m) => m.role === "user").length === 1) {
     conv.title = displayText.slice(0, 48);
   }
-  conv.messages.push({ role: "assistant", content: "" });
+  conv.messages.push({
+    role: "assistant",
+    content: "",
+    images: [],
+    pending: wantImage ? "Generating image…" : "Thinking…",
+  });
   pendingAttachments = [];
+  setImageMode(false);
   renderAttachPreviews();
   save();
   render();
@@ -1055,9 +1189,35 @@ async function sendMessage() {
   const assistantIndex = conv.messages.length - 1;
   let full = "";
 
+  // Direct image generation path for explicit image mode / clear prompts
+  if (wantImage && text && !attachments.length) {
+    try {
+      const res = await fetch("/api/image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      conv.messages[assistantIndex].pending = undefined;
+      conv.messages[assistantIndex].images = [
+        { url: data.url, dataUrl: data.dataUrl, prompt: data.prompt },
+      ];
+      conv.messages[assistantIndex].content = `Here's an image for: **${data.prompt}**`;
+      save();
+      render();
+      return;
+    } catch (err) {
+      showError(err.message || "Image generation failed, trying chat…");
+      conv.messages[assistantIndex].pending = "Thinking…";
+      renderMessages();
+    }
+    if (conv.messages[assistantIndex].images?.length) return;
+  }
+
   const apiMessages = conv.messages
     .slice(0, -1)
-    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
+    .filter((m) => m.role === "user" || (m.role === "assistant" && (m.content || m.images?.length)))
     .map((m) => {
       if (m.role === "user") {
         const files = m.apiAttachments || m.attachments || [];
@@ -1066,7 +1226,6 @@ async function sendMessage() {
       return { role: "assistant", content: m.content || "" };
     });
 
-  // Drop heavy apiAttachments after building request payload copy
   for (const m of conv.messages) {
     if (m.apiAttachments) delete m.apiAttachments;
   }
@@ -1078,6 +1237,7 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: apiMessages,
+        model: modelSelect?.value || "deepseek-v4-pro",
         systemPrompt: systemEl.value,
         webSearch: webSearchEl.checked,
         nomaskPrompt: nomaskPromptEl.checked,
@@ -1096,7 +1256,11 @@ async function sendMessage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
       full = data.content || "";
+      conv.messages[assistantIndex].pending = undefined;
       conv.messages[assistantIndex].content = full;
+      if (Array.isArray(data.images) && data.images.length) {
+        conv.messages[assistantIndex].images = data.images;
+      }
       save();
       render();
       return;
@@ -1127,7 +1291,13 @@ async function sendMessage() {
         } catch {
           continue;
         }
-        if (evt.type === "content" && evt.delta) {
+        if (evt.type === "image" && evt.image) {
+          conv.messages[assistantIndex].pending = undefined;
+          if (!conv.messages[assistantIndex].images) conv.messages[assistantIndex].images = [];
+          conv.messages[assistantIndex].images.push(evt.image);
+          renderMessages();
+        } else if (evt.type === "content" && evt.delta) {
+          conv.messages[assistantIndex].pending = undefined;
           full += evt.delta;
           conv.messages[assistantIndex].content = full;
           renderMessages();
@@ -1137,13 +1307,18 @@ async function sendMessage() {
       }
     }
 
+    conv.messages[assistantIndex].pending = undefined;
     conv.messages[assistantIndex].content = full;
     save();
     render();
-    if (!full) showError("Empty response");
+    if (!full && !conv.messages[assistantIndex].images?.length) showError("Empty response");
   } catch (err) {
-    if (!full) {
+    if (!full && !conv.messages[assistantIndex].images?.length) {
       conv.messages.pop();
+      save();
+      render();
+    } else {
+      conv.messages[assistantIndex].pending = undefined;
       save();
       render();
     }
@@ -1196,6 +1371,39 @@ inputEl.addEventListener("keydown", (e) => {
     sendMessage();
   }
 });
+
+if (imageBtn) {
+  imageBtn.addEventListener("click", () => {
+    setImageMode(!imageMode);
+    inputEl.focus();
+  });
+}
+
+if (modelSelect) {
+  modelSelect.addEventListener("change", () => {
+    localStorage.setItem(MODEL_KEY, modelSelect.value);
+  });
+}
+
+if (welcomeEl) {
+  welcomeEl.addEventListener("click", (e) => {
+    const chip = e.target.closest(".chip");
+    if (!chip) return;
+    if (chip.dataset.image) {
+      setImageMode(true);
+      inputEl.value = chip.dataset.image;
+      resizeInput();
+      inputEl.focus();
+      return;
+    }
+    if (chip.dataset.prompt) {
+      setImageMode(false);
+      inputEl.value = chip.dataset.prompt;
+      resizeInput();
+      inputEl.focus();
+    }
+  });
+}
 
 [systemEl, webSearchEl, nomaskPromptEl, streamEl].forEach((el) => {
   el.addEventListener("change", saveSettings);
