@@ -79,18 +79,29 @@ function createArchive() {
 
   const runtimeConfigPath = path.join(DEPLOY_DIR, "runtime-config.json");
   const runtimeConfig = {};
-  const nomaskKey = process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY;
-  if (nomaskKey) {
-    runtimeConfig.nomaskApiKey = nomaskKey;
-    runtimeConfig.openaiApiKey = nomaskKey; // back-compat
+  // Kelvin API (public) — personal key for your clients
+  const kelvinKey = process.env.KELVIN_API_KEY;
+  if (kelvinKey) runtimeConfig.kelvinApiKey = kelvinKey;
+
+  // Your own model engine (Ollama / vLLM / LM Studio OpenAI-compatible /v1)
+  if (process.env.KELVIN_ENGINE_BASE_URL) {
+    runtimeConfig.kelvinEngineBaseUrl = process.env.KELVIN_ENGINE_BASE_URL;
   }
-  if (process.env.NOMASK_BASE_URL) runtimeConfig.nomaskBaseUrl = process.env.NOMASK_BASE_URL;
-  if (process.env.NOMASK_MODEL) runtimeConfig.nomaskModel = process.env.NOMASK_MODEL;
+  if (process.env.KELVIN_ENGINE_API_KEY) {
+    runtimeConfig.kelvinEngineApiKey = process.env.KELVIN_ENGINE_API_KEY;
+  }
+  if (process.env.KELVIN_ENGINE_MODEL) {
+    runtimeConfig.kelvinEngineModel = process.env.KELVIN_ENGINE_MODEL;
+  }
+  if (process.env.KELVIN_IMAGE_ENGINE_URL) {
+    runtimeConfig.kelvinImageEngineUrl = process.env.KELVIN_IMAGE_ENGINE_URL;
+  }
+
   if (process.env.HOSTINGER_API_KEY) runtimeConfig.hostingerApiKey = process.env.HOSTINGER_API_KEY;
   if (process.env.ACCESS_CODE) runtimeConfig.accessCode = process.env.ACCESS_CODE;
   writeFileSync(runtimeConfigPath, JSON.stringify(runtimeConfig, null, 2));
 
-  console.log("Packaging KelvinOz AI…");
+  console.log("Packaging Kelvin API…");
   try {
     execSync(
       `cd "${DEPLOY_DIR}" && zip -r "${zipPath}" . -x "node_modules/*" -x "package-lock.json"`,
@@ -174,7 +185,13 @@ async function main() {
     body: JSON.stringify({}),
   }).catch(() => {});
 
-  console.log("Live at https://kelvinoz.com — access code: @535846.oZ");
+  console.log("Live at https://kelvinoz.com — Kelvin API /v1");
+  if (!process.env.KELVIN_ENGINE_BASE_URL) {
+    console.log("NOTE: KELVIN_ENGINE_BASE_URL not set — chat needs your Ollama/vLLM URL.");
+  }
+  if (process.env.KELVIN_API_KEY) {
+    console.log("Kelvin API key is configured (keep it private).");
+  }
 }
 
 main().catch((err) => {

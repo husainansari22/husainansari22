@@ -1,0 +1,13 @@
+# Run YOUR model engine (example: Ollama) on a machine you control.
+# Kelvin API on Hostinger will call this URL — not OpenAI/NoMask.
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama_data:

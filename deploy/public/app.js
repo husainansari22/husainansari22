@@ -12,7 +12,6 @@ const promptSaveBtn = document.getElementById("prompt-save");
 const promptHintEl = document.getElementById("prompt-hint");
 const savedPromptsEl = document.getElementById("saved-prompts");
 const webSearchEl = document.getElementById("web-search");
-const nomaskPromptEl = document.getElementById("nomask-prompt");
 const streamEl = document.getElementById("stream");
 const attachBtn = document.getElementById("attach-btn");
 const fileInput = document.getElementById("file-input");
@@ -202,7 +201,6 @@ function load() {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     if (typeof s.systemPrompt === "string") systemEl.value = s.systemPrompt;
     if (typeof s.webSearch === "boolean") webSearchEl.checked = s.webSearch;
-    if (typeof s.nomaskPrompt === "boolean") nomaskPromptEl.checked = s.nomaskPrompt;
     if (typeof s.stream === "boolean") streamEl.checked = s.stream;
     if (typeof s.activePromptId === "string") activePromptId = s.activePromptId;
   } catch {}
@@ -278,7 +276,6 @@ function saveSettings() {
     JSON.stringify({
       systemPrompt: systemEl.value,
       webSearch: webSearchEl.checked,
-      nomaskPrompt: nomaskPromptEl.checked,
       stream: streamEl.checked,
       activePromptId,
     })
@@ -1253,8 +1250,7 @@ async function sendMessage() {
         body: JSON.stringify({
           prompt: text,
           systemPrompt: systemEl.value.trim(),
-          model: modelSelect?.value || "deepseek-v4-pro",
-          nomaskPrompt: nomaskPromptEl.checked,
+          model: modelSelect?.value || "llama3.2",
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1301,10 +1297,9 @@ async function sendMessage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: apiMessages,
-        model: modelSelect?.value || "deepseek-v4-pro",
+        model: modelSelect?.value || "llama3.2",
         systemPrompt: systemEl.value,
         webSearch: webSearchEl.checked,
-        nomaskPrompt: nomaskPromptEl.checked,
         stream: streamEl.checked,
         plugins: getInstalledPluginObjects().map((p) => ({
           id: p.id,
@@ -1471,7 +1466,7 @@ if (welcomeEl) {
   });
 }
 
-[systemEl, webSearchEl, nomaskPromptEl, streamEl].forEach((el) => {
+[systemEl, webSearchEl, streamEl].forEach((el) => {
   el.addEventListener("change", saveSettings);
   el.addEventListener("input", saveSettings);
 });

@@ -1,6 +1,14 @@
+/**
+ * Kelvin API — your personal OpenAI-compatible API.
+ * Website and clients talk ONLY to Kelvin API.
+ * No NoMask / OpenAI / Pollinations vendor SDKs or keys.
+ */
+
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
+const engine = require("./kelvin-engine");
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -14,107 +22,14 @@ function loadRuntimeConfig() {
 }
 
 const RUNTIME = loadRuntimeConfig();
-const NOMASK_API_KEY =
-  process.env.NOMASK_API_KEY ||
-  RUNTIME.nomaskApiKey ||
-  "nmk_live_4bggckaynPfpt0DXwppv8PlQb7T824vfXHEUlJwJ";
-const NOMASK_BASE_URL = (
-  process.env.NOMASK_BASE_URL ||
-  RUNTIME.nomaskBaseUrl ||
-  "https://nomask.ai/api/v1"
-).replace(/\/$/, "");
-const MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "deepseek-v4-pro";
 
-const IMAGE_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "generate_image",
-      description:
-        "Generate an image and deliver it to the user in chat. Call this whenever the user wants a picture, photo, drawing, illustration, logo, or any visual. Do not describe how to generate images — call this tool instead.",
-      parameters: {
-        type: "object",
-        properties: {
-          prompt: {
-            type: "string",
-            description: "The image subject/scene to generate",
-          },
-          width: { type: "number" },
-          height: { type: "number" },
-        },
-        required: ["prompt"],
-      },
-    },
-  },
-];
+const KELVIN_API_KEY =
+  process.env.KELVIN_API_KEY ||
+  RUNTIME.kelvinApiKey ||
+  "";
 
-async function promptFromSystem(systemPrompt, userRequest, options = {}) {
-  const system = String(systemPrompt || "").trim();
-  const user = String(userRequest || "").trim();
-  if (!user) throw new Error("Image prompt is required");
-  if (!system) return user;
-
-  const model = String(options.model || MODEL || "deepseek-v4-flash").trim();
-  const messages = [{ role: "system", content: system }, { role: "user", content: user }];
-
-  const res = await fetch(`${NOMASK_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${NOMASK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      web_search: "off",
-      nomask_roleplay: options.nomaskPrompt !== false,
-      messages,
-    }),
-  });
-
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(text.slice(0, 200) || "Image prompt request failed");
-  }
-  if (!res.ok) {
-    throw new Error(data.error?.message || data.message || `HTTP ${res.status}`);
-  }
-
-  const out = String(data.choices?.[0]?.message?.content || "").trim();
-  if (!out) throw new Error("Empty response from system prompt");
-  return out.slice(0, 1000);
-}
-
-async function generateImage(prompt, width = 1024, height = 1024, systemPrompt = "", options = {}) {
-  const user = String(prompt || "").trim();
-  if (!user) throw new Error("Image prompt is required");
-
-  const finalPrompt =
-    options.useSystemPrompt && String(systemPrompt || "").trim()
-      ? await promptFromSystem(systemPrompt, user, options)
-      : user;
-
-  const w = Math.min(1280, Math.max(256, Number(width) || 1024));
-  const h = Math.min(1280, Math.max(256, Number(height) || 1024));
-  const seed = Date.now() % 100000;
-  const url =
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}` +
-    `?width=${w}&height=${h}&nologo=true&model=flux&seed=${seed}`;
-
-  // Return URL immediately — Hostinger gateways time out if we wait to download.
-  // Browser loads the image from Pollinations directly.
-  return {
-    url,
-    dataUrl: url,
-    prompt: finalPrompt,
-    userPrompt: user,
-    width: w,
-    height: h,
-  };
-}
+const DEFAULT_MODEL =
+  process.env.KELVIN_ENGINE_MODEL || RUNTIME.kelvinEngineModel || engine.ENGINE_MODEL;
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -157,6 +72,9 @@ function sendJson(res, status, data) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   });
   res.end(body);
 }
@@ -178,463 +96,405 @@ function serveFile(res, filePath) {
   });
 }
 
-const HOSTINGER_API_KEY =
-  process.env.HOSTINGER_API_KEY || RUNTIME.hostingerApiKey || "";
-const HOSTINGER_USERNAME = process.env.HOSTINGER_USERNAME || RUNTIME.hostingerUsername || "u343769360";
-const HOSTINGER_BASE = "https://developers.hostinger.com";
+function extractBearer(req) {
+  const auth = String(req.headers.authorization || "");
+  const m = auth.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1].trim() : "";
+}
 
-const HOSTINGER_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "list_hostinger_domains",
-      description: "List domains/websites on the Hostinger account.",
-      parameters: { type: "object", properties: {} },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "deploy_to_hostinger",
-      description: "Deploy this KelvinOz app to a Hostinger domain the user owns.",
-      parameters: {
-        type: "object",
-        properties: {
-          domain: { type: "string", description: "Target domain, e.g. kelvinoz.com" },
-        },
-        required: ["domain"],
-      },
-    },
-  },
-];
+/** Personal API key required for external clients; same-origin website allowed. */
+function authorizeKelvin(req) {
+  if (!KELVIN_API_KEY) {
+    // Dev/misconfig: still allow so local testing works, but warn via header path
+    return { ok: true, mode: "open" };
+  }
+  const token = extractBearer(req);
+  if (token && token === KELVIN_API_KEY) return { ok: true, mode: "key" };
 
-async function hostingerApi(endpoint, options = {}) {
-  const res = await fetch(`${HOSTINGER_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${HOSTINGER_API_KEY}`,
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
+  const host = String(req.headers.host || "");
+  const referer = String(req.headers.referer || "");
+  const origin = String(req.headers.origin || "");
+  const same =
+    (referer && host && referer.includes(host)) ||
+    (origin && host && origin.includes(host.replace(/:\d+$/, "")));
+  if (same) return { ok: true, mode: "site" };
+
+  return { ok: false, mode: "denied" };
+}
+
+function requireAuth(req, res) {
+  const authz = authorizeKelvin(req);
+  if (authz.ok) return true;
+  sendJson(res, 401, {
+    error: {
+      message: "Invalid Kelvin API key. Use Authorization: Bearer <KELVIN_API_KEY>",
+      type: "invalid_request_error",
+      code: "invalid_api_key",
     },
   });
-  const text = await res.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { message: text };
-  }
-  if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
-  return data;
+  return false;
 }
 
-async function runHostingerTool(name, args) {
-  if (!HOSTINGER_API_KEY) return JSON.stringify({ ok: false, error: "HOSTINGER_API_KEY not configured" });
-  if (name === "list_hostinger_domains") {
-    const data = await hostingerApi(`/api/hosting/v1/websites?username=${encodeURIComponent(HOSTINGER_USERNAME)}`);
-    const list = (data.data || []).map((w) => ({
-      domain: w.domain,
-      type: w.website_type,
-      root: w.root_directory,
-    }));
-    return JSON.stringify({ ok: true, domains: list });
-  }
-  if (name === "deploy_to_hostinger") {
-    const domain = String(args.domain || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^https?:\/\//, "")
-      .replace(/\/.*$/, "");
-    if (!domain) return JSON.stringify({ ok: false, error: "domain is required" });
-    return JSON.stringify({
-      ok: true,
-      message: `Hostinger plugin is ready for ${domain}. Ask the site owner to run a Hostinger deploy from the dashboard/scripts, or provide deploy credentials in chat for guided steps.`,
-      domain,
+function newId(prefix) {
+  return `${prefix}_${crypto.randomBytes(12).toString("hex")}`;
+}
+
+function corsPreflight(res) {
+  res.writeHead(204, {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Max-Age": "86400",
+  });
+  res.end();
+}
+
+async function handleModels(req, res) {
+  if (!requireAuth(req, res)) return;
+  try {
+    const data = await engine.listModels();
+    return sendJson(res, 200, data);
+  } catch (err) {
+    return sendJson(res, err.status || 500, {
+      error: { message: err.message, type: "kelvin_error" },
     });
   }
-  return JSON.stringify({ ok: false, error: "Unknown tool" });
 }
 
-function buildSystemPrompt(userPrompt, plugins) {
-  const parts = [];
-  if (userPrompt) parts.push(userPrompt);
-  parts.push(
-    "You have a generate_image tool that creates a real image and shows it in chat. " +
-      "When the user asks for an image, photo, picture, drawing, illustration, logo, or any visual, " +
-      "you MUST call generate_image. Never write instructions, steps, or tips on how to generate images. " +
-      "After the tool runs, reply with at most one short sentence."
-  );
-  const list = Array.isArray(plugins) ? plugins : [];
-  if (list.length) {
-    parts.push("Enabled plugins:");
-    for (const p of list) {
-      parts.push(`- ${p.name || p.id}: ${p.instruction || "Assist with this plugin."}`);
-    }
+async function handleChatCompletions(req, res, body) {
+  if (!requireAuth(req, res)) return;
+
+  const model = String(body.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const stream = body.stream === true;
+  const tools = Array.isArray(body.tools) ? body.tools : undefined;
+
+  // Inject system prompt helper from Kelvin website extras
+  const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : "";
+  const conversation = [];
+  if (systemPrompt) conversation.push({ role: "system", content: systemPrompt });
+  for (const m of messages) {
+    if (!m || !m.role) continue;
+    conversation.push(m);
   }
-  return parts.join("\n\n");
+
+  let upstream;
+  try {
+    upstream = await engine.chatCompletions({
+      model,
+      messages: conversation,
+      stream,
+      tools,
+      tool_choice: body.tool_choice,
+    });
+  } catch (err) {
+    return sendJson(res, err.status || 503, {
+      error: { message: err.message, type: "kelvin_engine_error" },
+    });
+  }
+
+  if (!stream) {
+    const text = await upstream.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      return sendJson(res, 502, {
+        error: { message: text.slice(0, 400) || `Engine HTTP ${upstream.status}`, type: "kelvin_engine_error" },
+      });
+    }
+    if (!upstream.ok) {
+      return sendJson(res, upstream.status, {
+        error: {
+          message: data.error?.message || data.message || `Engine HTTP ${upstream.status}`,
+          type: "kelvin_engine_error",
+        },
+      });
+    }
+    // Normalize id branding
+    if (!data.id) data.id = newId("chatcmpl");
+    data.object = data.object || "chat.completion";
+    return sendJson(res, 200, data);
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text();
+    let friendly = text.slice(0, 400);
+    try {
+      friendly = JSON.parse(text).error?.message || friendly;
+    } catch {}
+    return sendJson(res, upstream.status, {
+      error: { message: friendly, type: "kelvin_engine_error" },
+    });
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "X-Accel-Buffering": "no",
+  });
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+  const reader = upstream.body.getReader();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(decoder.decode(value, { stream: true }));
+    }
+  } catch (err) {
+    res.write(
+      `data: ${JSON.stringify({
+        error: { message: err.message },
+      })}\n\n`
+    );
+  }
+  res.end();
 }
 
-async function handleChat(req, res, body) {
-  const apiKey = NOMASK_API_KEY;
-  if (!apiKey) return sendJson(res, 401, { error: "Missing NoMask API key" });
+async function handleImageGenerations(req, res, body) {
+  if (!requireAuth(req, res)) return;
+  try {
+    const prompt = String(body.prompt || "").trim();
+    if (!prompt) {
+      return sendJson(res, 400, {
+        error: { message: "prompt is required", type: "invalid_request_error" },
+      });
+    }
+    let width = 1024;
+    let height = 1024;
+    if (typeof body.size === "string" && /^\d+x\d+$/.test(body.size)) {
+      const [w, h] = body.size.split("x").map(Number);
+      width = w;
+      height = h;
+    }
+    if (body.width) width = Number(body.width) || width;
+    if (body.height) height = Number(body.height) || height;
 
-  const messages = Array.isArray(body?.messages) ? body.messages : [];
-  const systemPrompt = typeof body?.systemPrompt === "string" ? body.systemPrompt.trim() : "";
-  const plugins = Array.isArray(body?.plugins) ? body.plugins : [];
-  const webSearch = body?.webSearch ? "on" : "off";
-  const nomaskPrompt = Boolean(body?.nomaskPrompt);
-  const stream = body?.stream !== false;
-  const hostingerEnabled = plugins.some((p) => String(p.id || "").startsWith("hostinger"));
-  const hostingerKey = String(body?.hostingerApiKey || HOSTINGER_API_KEY || "").trim();
-  const model = String(body?.model || MODEL).trim() || MODEL;
-  const tools = [...IMAGE_TOOLS, ...(hostingerEnabled ? HOSTINGER_TOOLS : [])];
+    // Optional: rewrite prompt via chat engine using caller's systemPrompt
+    let finalPrompt = prompt;
+    const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : "";
+    if (systemPrompt && engine.engineConfigured()) {
+      try {
+        const upstream = await engine.chatCompletions({
+          model: body.model || DEFAULT_MODEL,
+          stream: false,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+        });
+        const raw = await upstream.text();
+        const parsed = JSON.parse(raw);
+        const out = parsed.choices?.[0]?.message?.content;
+        if (upstream.ok && out) finalPrompt = String(out).trim().slice(0, 1000);
+      } catch {
+        /* use original prompt */
+      }
+    }
+
+    const img = await engine.generateImage({ prompt: finalPrompt, width, height });
+    return sendJson(res, 200, {
+      created: Math.floor(Date.now() / 1000),
+      data: [{ url: img.url || img.dataUrl, revised_prompt: finalPrompt }],
+      // Kelvin extras for the website
+      url: img.url || img.dataUrl,
+      dataUrl: img.dataUrl || img.url,
+      prompt: finalPrompt,
+      userPrompt: prompt,
+    });
+  } catch (err) {
+    return sendJson(res, err.status || 500, {
+      error: { message: err.message, type: "kelvin_image_error" },
+    });
+  }
+}
+
+function handleStatus(req, res) {
+  return sendJson(res, 200, {
+    name: "Kelvin API",
+    version: "1.0.0",
+    engine: engine.engineConfigured() ? "connected" : "not_configured",
+    image_engine: engine.imageEngineConfigured() ? "connected" : "not_configured",
+    default_model: DEFAULT_MODEL,
+    auth: KELVIN_API_KEY ? "api_key_required" : "open_dev_mode",
+  });
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  let pathname = url.pathname;
+  if (pathname.length > 1 && pathname.endsWith("/")) pathname = pathname.slice(0, -1);
+
+  if (req.method === "OPTIONS") return corsPreflight(res);
+
+  try {
+    if (req.method === "GET" && (pathname === "/v1" || pathname === "/v1/status")) {
+      return handleStatus(req, res);
+    }
+
+    if (req.method === "GET" && pathname === "/v1/models") {
+      return handleModels(req, res);
+    }
+
+    if (req.method === "POST" && pathname === "/v1/chat/completions") {
+      const body = await readBody(req);
+      return handleChatCompletions(req, res, body);
+    }
+
+    if (req.method === "POST" && pathname === "/v1/images/generations") {
+      const body = await readBody(req);
+      return handleImageGenerations(req, res, body);
+    }
+
+    // Back-compat aliases so old bookmarks don't hit vendor names — still Kelvin only
+    if (req.method === "POST" && pathname === "/api/chat") {
+      const body = await readBody(req);
+      // Translate legacy website payload → OpenAI chat, then map stream to Kelvin site events
+      return handleLegacySiteChat(req, res, body);
+    }
+
+    if (req.method === "POST" && pathname === "/api/image") {
+      const body = await readBody(req);
+      return handleImageGenerations(req, res, body);
+    }
+  } catch (err) {
+    return sendJson(res, 500, { error: { message: err.message, type: "kelvin_error" } });
+  }
+
+  const assetPath = path.join(PUBLIC_DIR, pathname === "/" ? "index.html" : pathname);
+  if (assetPath.startsWith(PUBLIC_DIR) && fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
+    return serveFile(res, assetPath);
+  }
+  return serveFile(res, path.join(PUBLIC_DIR, "index.html"));
+});
+
+/**
+ * Legacy site chat format (SSE {type:content|image|done}) so the website
+ * only depends on Kelvin routes — no vendor APIs in the browser.
+ */
+async function handleLegacySiteChat(req, res, body) {
+  if (!requireAuth(req, res)) return;
+
+  const model = String(body.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  const stream = body.stream !== false;
+  const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt.trim() : "";
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const conversation = [];
+  if (systemPrompt) {
+    conversation.push({
+      role: "system",
+      content:
+        systemPrompt +
+        "\n\nWhen the user asks for an image, reply with a single line: IMAGE_PROMPT: <prompt>. Otherwise answer normally.",
+    });
+  } else {
+    conversation.push({
+      role: "system",
+      content:
+        "You are Kelvin AI. When the user asks for an image, reply with a single line: IMAGE_PROMPT: <prompt>. Otherwise answer normally.",
+    });
+  }
+  for (const m of messages) {
+    if (!m || !m.role) continue;
+    conversation.push({ role: m.role, content: m.content });
+  }
 
   function startSse() {
     if (res.headersSent) return;
     res.writeHead(200, {
-      "Content-Type": "text/event-stream",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
     if (typeof res.flushHeaders === "function") res.flushHeaders();
   }
-
   function sse(obj) {
     startSse();
     res.write(`data: ${JSON.stringify(obj)}\n\n`);
   }
 
-  const collectedImages = [];
-
-  async function hostingerApiAuthed(endpoint, options = {}) {
-    if (!hostingerKey) throw new Error("Connect Hostinger with an API token first");
-    const res = await fetch(`${HOSTINGER_BASE}${endpoint}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${hostingerKey}`,
-        "Content-Type": "application/json",
-        ...(options.headers || {}),
-      },
-    });
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { message: text };
-    }
-    if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
-    return data;
-  }
-
-  async function runHostingerToolAuthed(name, args) {
-    if (name === "list_hostinger_domains") {
-      const data = await hostingerApiAuthed(
-        `/api/hosting/v1/websites?username=${encodeURIComponent(HOSTINGER_USERNAME)}`
-      );
-      const list = (data.data || []).map((w) => ({
-        domain: w.domain,
-        type: w.website_type,
-        root: w.root_directory,
-      }));
-      return JSON.stringify({ ok: true, domains: list });
-    }
-    if (name === "deploy_to_hostinger") {
-      const domain = String(args.domain || "")
-        .trim()
-        .toLowerCase()
-        .replace(/^https?:\/\//, "")
-        .replace(/\/.*$/, "");
-      if (!domain) return JSON.stringify({ ok: false, error: "domain is required" });
-      return JSON.stringify({
-        ok: true,
-        connected: true,
-        message: `Hostinger is connected. Domain target accepted: ${domain}. I can list websites and guide deploy steps with direct Hostinger API access.`,
-        domain,
-      });
-    }
-    return JSON.stringify({ ok: false, error: "Unknown tool" });
-  }
-
-  const conversation = [];
-  const mergedSystem = buildSystemPrompt(systemPrompt, plugins);
-  if (mergedSystem) {
-    conversation.push({ role: "system", content: mergedSystem });
-  }
-  for (const m of messages) {
-    if (!m || (m.role !== "user" && m.role !== "assistant" && m.role !== "tool")) continue;
-    if (m.content == null || m.content === "") continue;
-    if (typeof m.content === "string" || Array.isArray(m.content)) {
-      const msg = { role: m.role, content: m.content };
-      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
-      if (m.tool_calls) msg.tool_calls = m.tool_calls;
-      conversation.push(msg);
-    }
-  }
-
-  async function runAnyTool(name, args) {
-    if (name === "generate_image") {
-      const img = await generateImage(args.prompt || "", args.width, args.height, systemPrompt, {
-        model,
-        nomaskPrompt,
-        useSystemPrompt: !!systemPrompt,
-      });
-      const slim = {
-        url: img.url,
-        dataUrl: img.dataUrl || img.url,
-        prompt: img.userPrompt || img.prompt,
-      };
-      collectedImages.push(slim);
-      if (stream) sse({ type: "image", image: slim });
-      return JSON.stringify({
-        ok: true,
-        prompt: img.prompt,
-        url: img.url,
-        delivered_to_user: true,
-        note: "Image already shown in the chat UI. Reply with one short sentence only. Do not explain how to generate images.",
-      });
-    }
-    return runHostingerToolAuthed(name, args);
-  }
-
-  async function callNomask({ streamMode, withTools }) {
-    return fetch(`${NOMASK_BASE_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model,
-        messages: conversation,
-        web_search: webSearch,
-        nomask_roleplay: nomaskPrompt,
-        stream: streamMode,
-        ...(withTools && tools.length ? { tools, tool_choice: "auto" } : {}),
-      }),
-    });
-  }
-
-  // Non-stream path
-  if (!stream) {
-    let rounds = 0;
-    while (rounds < 4) {
-      rounds += 1;
-      const upstream = await callNomask({ streamMode: false, withTools: tools.length > 0 });
-      const text = await upstream.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        return sendJson(res, 502, { error: text.slice(0, 500) || `HTTP ${upstream.status}` });
-      }
-      if (!upstream.ok) {
-        return sendJson(res, upstream.status, {
-          error: data.error?.message || data.message || `HTTP ${upstream.status}`,
-        });
-      }
-      const message = data.choices?.[0]?.message || {};
-      const toolCalls = tools.length ? message.tool_calls || [] : [];
-      if (toolCalls.length) {
-        conversation.push({
-          role: "assistant",
-          content: message.content || null,
-          tool_calls: toolCalls,
-        });
-        for (const tc of toolCalls) {
-          let args = {};
-          try {
-            args = JSON.parse(tc.function?.arguments || "{}");
-          } catch {}
-          const result = await runAnyTool(tc.function?.name, args);
-          conversation.push({
-            role: "tool",
-            tool_call_id: tc.id,
-            content: result,
-          });
-        }
-        continue;
-      }
-      return sendJson(res, 200, {
-        content: message.content || "",
-        images: collectedImages,
-      });
-    }
-    return sendJson(res, 200, { content: "", images: collectedImages });
-  }
-
-  // Stream path — open SSE immediately so Hostinger does not 504
-  startSse();
-  sse({ type: "status", message: "thinking" });
-
-  for (let round = 0; round < 3; round++) {
-    const upstreamTools = await callNomask({ streamMode: false, withTools: true });
-    const text = await upstreamTools.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      break;
-    }
-    if (!upstreamTools.ok) {
-      sse({ type: "error", error: data.error?.message || data.message || `HTTP ${upstreamTools.status}` });
+  let upstream;
+  try {
+    upstream = await engine.chatCompletions({ model, messages: conversation, stream: false });
+  } catch (err) {
+    if (stream) {
+      sse({ type: "error", error: err.message });
       sse({ type: "done" });
       return res.end();
     }
-    const message = data.choices?.[0]?.message || {};
-    const toolCalls = message.tool_calls || [];
-    if (!toolCalls.length) {
-      // If image already delivered, don't re-stream a how-to essay — short ack or content
-      if (collectedImages.length) {
-        const ack = (message.content || "").trim();
-        if (ack && !/how to (generate|create|make).*image/i.test(ack) && ack.length < 280) {
-          sse({ type: "content", delta: ack });
-        } else if (!ack) {
-          sse({ type: "content", delta: "Here you go." });
-        } else {
-          sse({ type: "content", delta: "Here you go." });
-        }
-        sse({ type: "done" });
-        return res.end();
-      }
-      if (message.content) {
-        sse({ type: "content", delta: message.content });
-        sse({ type: "done" });
-        return res.end();
-      }
-      break;
-    }
-    conversation.push({
-      role: "assistant",
-      content: message.content || null,
-      tool_calls: toolCalls,
-    });
-    for (const tc of toolCalls) {
-      let args = {};
-      try {
-        args = JSON.parse(tc.function?.arguments || "{}");
-      } catch {}
-      const result = await runAnyTool(tc.function?.name, args);
-      conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
-    }
-    // If we already delivered an image, skip extra model rounds that write tutorials
-    if (collectedImages.length) {
-      sse({ type: "content", delta: "Here you go." });
+    return sendJson(res, err.status || 503, { error: err.message });
+  }
+
+  const text = await upstream.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    const msg = text.slice(0, 400) || `Engine HTTP ${upstream.status}`;
+    if (stream) {
+      sse({ type: "error", error: msg });
       sse({ type: "done" });
       return res.end();
     }
+    return sendJson(res, 502, { error: msg });
   }
-
-  if (collectedImages.length) {
-    sse({ type: "content", delta: "Here you go." });
-    sse({ type: "done" });
-    return res.end();
-  }
-
-  const upstream = await callNomask({ streamMode: true, withTools: false });
 
   if (!upstream.ok) {
-    const text = await upstream.text();
-    let friendly = text.slice(0, 800);
-    try {
-      const parsed = JSON.parse(text);
-      friendly = parsed.error?.message || parsed.message || friendly;
-    } catch {}
-    sse({ type: "error", error: friendly });
-    sse({ type: "done" });
-    return res.end();
-  }
-
-  const reader = upstream.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || "";
-
-      for (const line of lines) {
-        if (!line.startsWith("data:")) continue;
-        const data = line.slice(5).trim();
-        if (!data) continue;
-        if (data === "[DONE]") {
-          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-          continue;
-        }
-        try {
-          const parsed = JSON.parse(data);
-          if (parsed.error) {
-            res.write(
-              `data: ${JSON.stringify({
-                type: "error",
-                error: parsed.error.message || JSON.stringify(parsed.error),
-              })}\n\n`
-            );
-            continue;
-          }
-          const delta = parsed.choices?.[0]?.delta?.content;
-          if (delta) {
-            res.write(`data: ${JSON.stringify({ type: "content", delta })}\n\n`);
-          }
-        } catch {}
-      }
+    const msg = data.error?.message || data.message || `Engine HTTP ${upstream.status}`;
+    if (stream) {
+      sse({ type: "error", error: msg });
+      sse({ type: "done" });
+      return res.end();
     }
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
-  } catch (err) {
-    res.write(`data: ${JSON.stringify({ type: "error", error: err.message })}\n\n`);
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+    return sendJson(res, upstream.status, { error: msg });
   }
 
+  let content = String(data.choices?.[0]?.message?.content || "");
+  const imageMatch = content.match(/IMAGE_PROMPT:\s*(.+)$/im);
+  if (imageMatch && engine.imageEngineConfigured()) {
+    try {
+      const img = await engine.generateImage({ prompt: imageMatch[1].trim() });
+      content = content.replace(imageMatch[0], "").trim() || "Here you go.";
+      if (stream) {
+        sse({ type: "status", message: "thinking" });
+        sse({
+          type: "image",
+          image: { url: img.url, dataUrl: img.dataUrl || img.url, prompt: img.prompt },
+        });
+        sse({ type: "content", delta: content });
+        sse({ type: "done" });
+        return res.end();
+      }
+      return sendJson(res, 200, {
+        content,
+        images: [{ url: img.url, dataUrl: img.dataUrl || img.url, prompt: img.prompt }],
+      });
+    } catch (err) {
+      content = `Image engine error: ${err.message}`;
+    }
+  }
+
+  if (!stream) return sendJson(res, 200, { content, images: [] });
+
+  sse({ type: "status", message: "thinking" });
+  // Stream in chunks for nicer UX
+  const chunkSize = 24;
+  for (let i = 0; i < content.length; i += chunkSize) {
+    sse({ type: "content", delta: content.slice(i, i + chunkSize) });
+  }
+  sse({ type: "done" });
   res.end();
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = url.pathname;
-
-  if (req.method === "POST" && pathname === "/api/chat") {
-    try {
-      const body = await readBody(req);
-      return await handleChat(req, res, body);
-    } catch (err) {
-      return sendJson(res, 500, { error: err.message });
-    }
-  }
-
-  if (req.method === "POST" && pathname === "/api/image") {
-    try {
-      const body = await readBody(req);
-      const systemPrompt = typeof body?.systemPrompt === "string" ? body.systemPrompt.trim() : "";
-      const model = String(body?.model || MODEL).trim() || MODEL;
-      const nomaskPrompt = body?.nomaskPrompt !== false;
-      const img = await generateImage(body?.prompt, body?.width, body?.height, systemPrompt, {
-        model,
-        nomaskPrompt,
-        useSystemPrompt: !!systemPrompt,
-      });
-      return sendJson(res, 200, img);
-    } catch (err) {
-      return sendJson(res, 500, { error: err.message });
-    }
-  }
-
-  if (pathname.startsWith("/")) {
-    const assetPath = path.join(PUBLIC_DIR, pathname === "/" ? "index.html" : pathname);
-    if (assetPath.startsWith(PUBLIC_DIR) && fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) {
-      return serveFile(res, assetPath);
-    }
-  }
-
-  return serveFile(res, path.join(PUBLIC_DIR, "index.html"));
-});
-
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`KelvinOz AI on ${PORT}`);
+  console.log(`Kelvin API on ${PORT}`);
+  console.log(`  engine: ${engine.engineConfigured() ? engine.ENGINE_BASE : "NOT CONFIGURED"}`);
+  console.log(`  auth: ${KELVIN_API_KEY ? "Kelvin API key enabled" : "open (set KELVIN_API_KEY)"}`);
 });
 server.keepAliveTimeout = 120000;
 server.headersTimeout = 125000;

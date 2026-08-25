@@ -1,36 +1,66 @@
-# KelvinOz AI
+# Kelvin API + KelvinOz
 
-Uncensored, unrestricted AI coding assistant at **kelvinoz.com**.
+Personal **Kelvin API** at **kelvinoz.com** — OpenAI-compatible endpoints you own.
+The website talks only to Kelvin API. No NoMask / OpenAI vendor keys on the server.
 
-## Features
+## Architecture
 
-- Access code lock (`@535846.oZ`)
-- Uncensored coding assistant — JavaScript, TypeScript, React, Node.js, Python, and more
-- OpenAI-compatible API support
-- Streaming chat with markdown and code highlighting
-- Conversation history saved locally
-
-## Local Development
-
-```bash
-npm install
-cp .env.example .env.local
-# Set OPENAI_API_KEY and ACCESS_CODE in .env.local
-npm run dev
+```
+Browser / your apps  →  Kelvin API (/v1)  →  YOUR engine (Ollama, vLLM, LM Studio, …)
 ```
 
-## Deploy to kelvinoz.com (Hostinger)
+## Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/v1/status` | API status |
+| GET | `/v1/models` | Model list |
+| POST | `/v1/chat/completions` | Chat (OpenAI-compatible) |
+| POST | `/v1/images/generations` | Images (needs your image engine) |
+
+Docs page: https://kelvinoz.com/api.html
+
+## Auth
 
 ```bash
-HOSTINGER_API_KEY=your-token npm run deploy
+Authorization: Bearer YOUR_KELVIN_API_KEY
 ```
 
-This uploads a clean standalone build, replaces old files, and restarts the Node.js server.
+Same-origin website requests are allowed without a key. External scripts/apps need the key.
 
-## Environment Variables
+## Required: your model engine
+
+Hostinger Node cannot run big LLMs. Run Ollama (or similar) on a VPS **you** control:
+
+```bash
+# On your VPS
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.2
+# API: http://YOUR_VPS_IP:11434/v1
+```
+
+Or: `docker compose -f deploy/docker-compose.engine.yml up -d`
+
+## Deploy
+
+```bash
+export HOSTINGER_API_KEY=...
+export KELVIN_API_KEY=kelvin_your_secret
+export KELVIN_ENGINE_BASE_URL=http://YOUR_VPS_IP:11434/v1
+export KELVIN_ENGINE_MODEL=llama3.2
+# optional images:
+# export KELVIN_IMAGE_ENGINE_URL=http://YOUR_VPS_IP:7860/v1
+
+node scripts/deploy-hostinger.mjs
+```
+
+## Environment
 
 | Variable | Description |
 |----------|-------------|
-| `ACCESS_CODE` | Login access code (default: `@535846.oZ`) |
-| `OPENAI_API_KEY` | AI provider API key |
-| `HOSTINGER_API_KEY` | For deploy script only (not used by the website) |
+| `KELVIN_API_KEY` | Your personal Kelvin API key |
+| `KELVIN_ENGINE_BASE_URL` | Your OpenAI-compatible engine base (`…/v1`) |
+| `KELVIN_ENGINE_API_KEY` | Optional key for your engine |
+| `KELVIN_ENGINE_MODEL` | Default model id |
+| `KELVIN_IMAGE_ENGINE_URL` | Optional image engine base (`…/v1`) |
+| `HOSTINGER_API_KEY` | Deploy script only |
