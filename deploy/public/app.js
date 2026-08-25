@@ -408,7 +408,10 @@ async function sendMessage(text) {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ messages: buildApiMessages(conv, displayText, attachments) }),
+      body: JSON.stringify({
+        model: "deepseek-v4-pro",
+        messages: buildApiMessages(conv, displayText, attachments),
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
