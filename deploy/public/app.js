@@ -104,6 +104,39 @@ function setActive(id) {
   activeId = id;
   render();
   closeSidebar();
+  closeSection();
+}
+
+function deleteChat(id, e) {
+  if (e) {
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  conversations = conversations.filter((c) => c.id !== id);
+  if (!conversations.length) {
+    newChat(false);
+  } else if (activeId === id) {
+    activeId = conversations[0].id;
+  }
+  save();
+  render();
+}
+
+function openSection(title) {
+  closeSidebar();
+  closeSettings();
+  const page = document.getElementById("section-page");
+  document.getElementById("section-title").textContent = title;
+  document.getElementById("section-body").textContent = `${title} — coming soon.`;
+  page.classList.add("is-open");
+  page.setAttribute("aria-hidden", "false");
+}
+
+function closeSection() {
+  const page = document.getElementById("section-page");
+  if (!page) return;
+  page.classList.remove("is-open");
+  page.setAttribute("aria-hidden", "true");
 }
 
 function iconBtn(label, path) {
@@ -149,15 +182,23 @@ function renderMessages() {
 function renderRecents() {
   recentsEl.innerHTML = conversations
     .map(
-      (c) =>
-        `<button type="button" class="recent-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">${escapeHtml(
-          c.title || "New chat"
-        )}</button>`
+      (c) => `
+      <div class="recent-item ${c.id === activeId ? "active" : ""}" data-id="${c.id}">
+        <button type="button" class="recent-open" data-id="${c.id}">${escapeHtml(c.title || "New chat")}</button>
+        <button type="button" class="recent-delete" data-id="${c.id}" aria-label="Delete chat" title="Delete">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>
+          </svg>
+        </button>
+      </div>`
     )
     .join("");
 
-  recentsEl.querySelectorAll(".recent-item").forEach((btn) => {
+  recentsEl.querySelectorAll(".recent-open").forEach((btn) => {
     btn.addEventListener("click", () => setActive(btn.dataset.id));
+  });
+  recentsEl.querySelectorAll(".recent-delete").forEach((btn) => {
+    btn.addEventListener("click", (e) => deleteChat(btn.dataset.id, e));
   });
 }
 
@@ -302,7 +343,21 @@ document.getElementById("new-chat-top").addEventListener("click", () => newChat(
 document.getElementById("open-settings").addEventListener("click", openSettings);
 document.getElementById("nav-system-prompt").addEventListener("click", openSettings);
 document.getElementById("settings-back").addEventListener("click", closeSettings);
+document.getElementById("section-back").addEventListener("click", closeSection);
 document.getElementById("more-btn").addEventListener("click", openSettings);
+
+document.querySelectorAll(".nav-item[data-nav]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const labels = {
+      library: "Library",
+      projects: "Projects",
+      plugins: "Plugins",
+      codex: "Codex",
+      images: "Images",
+    };
+    openSection(labels[btn.dataset.nav] || btn.dataset.nav);
+  });
+});
 
 sendBtn.addEventListener("click", sendMessage);
 inputEl.addEventListener("input", resizeInput);
