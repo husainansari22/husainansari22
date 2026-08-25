@@ -269,7 +269,7 @@ function save() {
 function setImageMode(on) {
   imageMode = !!on;
   if (imageBtn) imageBtn.classList.toggle("active", imageMode);
-  inputEl.placeholder = imageMode ? "Describe the image to generate…" : "Ask KelvinOz AI";
+  inputEl.placeholder = imageMode ? "Describe what to create…" : "Ask KelvinOz AI";
 }
 
 function saveSettings() {
@@ -1184,10 +1184,7 @@ async function sendMessage() {
     conv = getActive();
   }
 
-  const wantImage =
-    imageMode ||
-    /^(generate|create|draw|make)\b.*\b(image|photo|picture|logo|illustration)\b/i.test(text) ||
-    /\b(generate an image|create an image|draw me|make a picture)\b/i.test(text);
+  const wantImage = imageMode;
 
   const displayText =
     text ||
@@ -1201,13 +1198,9 @@ async function sendMessage() {
     dataUrl: f.kind === "image" || f.kind === "video" ? f.dataUrl : undefined,
   }));
 
-  const userText = wantImage && text && !/generate_image|image prompt/i.test(text)
-    ? `Generate an image: ${text}`
-    : text;
-
   conv.messages.push({
     role: "user",
-    content: userText,
+    content: text,
     attachments: storedAttachments,
     apiAttachments: attachments,
   });
@@ -1218,11 +1211,7 @@ async function sendMessage() {
     role: "assistant",
     content: "",
     images: [],
-    pending: wantImage
-      ? systemEl.value.trim()
-        ? "Applying system prompt & generating…"
-        : "Generating image…"
-      : "Thinking…",
+    pending: wantImage ? "Generating…" : "Thinking…",
   });
   pendingAttachments = [];
   setImageMode(false);
@@ -1238,7 +1227,7 @@ async function sendMessage() {
   const assistantIndex = conv.messages.length - 1;
   let full = "";
 
-  // Direct image generation path for explicit image mode / clear prompts
+  // Create image: system prompt alone decides what gets rendered
   if (wantImage && text && !attachments.length) {
     try {
       const res = await fetch("/api/image", {
@@ -1255,26 +1244,22 @@ async function sendMessage() {
       if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
       conv.messages[assistantIndex].pending = undefined;
       conv.messages[assistantIndex].images = [
-        { url: data.url, dataUrl: data.dataUrl, prompt: data.userPrompt || data.prompt },
+        { url: data.url, dataUrl: data.dataUrl, prompt: data.userPrompt || text },
       ];
-      const shown = data.userPrompt || text;
-      if (data.systemPromptApplied && data.composedBy === "system+ai") {
-        conv.messages[assistantIndex].content =
-          `Here's **${shown}** — composed with your system prompt:\n\n> ${data.prompt}`;
-      } else if (data.systemPromptApplied) {
-        conv.messages[assistantIndex].content = `Here's an image for **${shown}** (system prompt applied)`;
-      } else {
-        conv.messages[assistantIndex].content = `Here's an image for: **${shown}**`;
-      }
+      conv.messages[assistantIndex].content = "";
       save();
       render();
       return;
     } catch (err) {
-      showError(err.message || "Image generation failed, trying chat…");
-      conv.messages[assistantIndex].pending = "Thinking…";
-      renderMessages();
+      showError(err.message || "Image generation failed");
+      conv.messages.pop();
+      conv.messages.pop();
+      save();
+      render();
+      loading = false;
+      sendBtn.disabled = false;
+      return;
     }
-    if (conv.messages[assistantIndex].images?.length) return;
   }
 
   const apiMessages = conv.messages
@@ -1455,7 +1440,7 @@ if (welcomeEl) {
     if (!chip) return;
     if (chip.dataset.image) {
       setImageMode(true);
-      inputEl.value = chip.dataset.image;
+      if (chip.dataset.image !== "1") inputEl.value = chip.dataset.image;
       resizeInput();
       inputEl.focus();
       return;

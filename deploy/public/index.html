@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0c0f" />
   <title>KelvinOz AI</title>
-  <link rel="stylesheet" href="/styles.css?v=13" />
+  <link rel="stylesheet" href="/styles.css?v=14" />
 </head>
 <body>
   <div id="overlay" class="overlay" hidden></div>
@@ -90,11 +90,11 @@
       <div id="welcome" class="welcome">
         <div class="welcome-orb">✦</div>
         <h1>What can I help with?</h1>
-        <p>Chat, code, search the web, analyze files, and generate images — powered by NoMask.</p>
+        <p>Chat, code, search the web, analyze files, and create images — your system prompt controls everything.</p>
         <div class="chips">
           <button type="button" class="chip" data-prompt="Explain quantum computing simply">Explain something</button>
           <button type="button" class="chip" data-prompt="Write a clean Node.js API with auth">Write code</button>
-          <button type="button" class="chip" data-image="A cinematic neon city at night, ultra detailed">Generate an image</button>
+          <button type="button" class="chip" data-image="1">Create image</button>
           <button type="button" class="chip" data-prompt="Summarize the latest AI news">Web research</button>
         </div>
       </div>
@@ -110,7 +110,7 @@
             <path d="M12 5v14M5 12h14"/>
           </svg>
         </button>
-        <button type="button" id="image-btn" class="tool-btn" aria-label="Generate image" title="Generate image">
+        <button type="button" id="image-btn" class="tool-btn" aria-label="Create image" title="Create image">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.5"/><path d="M21 16l-5-5-7 7"/></svg>
         </button>
         <input id="file-input" type="file" accept="image/*,video/*,.txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.css,.html,.csv,.pdf,.zip" multiple hidden />
@@ -204,7 +204,7 @@
     </div>
   </div>
 
-  <script src="/plugins-data.js?v=13"></script>
-  <script src="/app.js?v=13"></script>
+  <script src="/plugins-data.js?v=14"></script>
+  <script src="/app.js?v=14"></script>
 </body>
 </html>

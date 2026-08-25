@@ -30,11 +30,11 @@ const IMAGE_TOOLS = [
     type: "function",
     function: {
       name: "generate_image",
-      description: "Generate an image from a text prompt. Always apply the user's system prompt style, constraints, and visual rules to the image.",
+      description: "Generate an image.",
       parameters: {
         type: "object",
         properties: {
-          prompt: { type: "string", description: "Detailed image prompt" },
+          prompt: { type: "string", description: "Image prompt" },
           width: { type: "number" },
           height: { type: "number" },
         },
@@ -44,27 +44,14 @@ const IMAGE_TOOLS = [
   },
 ];
 
-function buildImagePromptFallback(userPrompt, systemPrompt) {
-  const user = String(userPrompt || "").trim();
+async function promptFromSystem(systemPrompt, userRequest, options = {}) {
   const system = String(systemPrompt || "").trim();
+  const user = String(userRequest || "").trim();
   if (!user) throw new Error("Image prompt is required");
-  if (!system) return user.slice(0, 700);
-
-  const maxLen = 700;
-  const styleBudget = Math.min(320, Math.max(100, maxLen - user.length - 24));
-  const style =
-    system.length > styleBudget ? `${system.slice(0, styleBudget).trim()}…` : system;
-  return `${user}. Style and rules (mandatory): ${style}`.slice(0, maxLen);
-}
-
-async function composeImagePrompt(userPrompt, systemPrompt, options = {}) {
-  const user = String(userPrompt || "").trim();
-  const system = String(systemPrompt || "").trim();
-  if (!user) throw new Error("Image prompt is required");
-  if (!system) return user.slice(0, 700);
+  if (!system) return user;
 
   const model = String(options.model || MODEL || "deepseek-v4-flash").trim();
-  const nomaskRoleplay = options.nomaskPrompt !== false;
+  const messages = [{ role: "system", content: system }, { role: "user", content: user }];
 
   const res = await fetch(`${NOMASK_BASE_URL}/chat/completions`, {
     method: "POST",
@@ -76,29 +63,8 @@ async function composeImagePrompt(userPrompt, systemPrompt, options = {}) {
       model,
       stream: false,
       web_search: "off",
-      nomask_roleplay: nomaskRoleplay,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are an expert Flux image prompt engineer. " +
-            "Write ONE detailed English image prompt that will be sent directly to an image model. " +
-            "Output ONLY the prompt text — no quotes, labels, markdown, or explanation.\n\n" +
-            "Requirements:\n" +
-            "1. Follow the SYSTEM PROMPT completely — every style rule, aesthetic, color palette, mood, composition rule, subject constraint, and restriction.\n" +
-            "2. Include the user's requested subject/scene.\n" +
-            "3. Add concrete visual details: lighting, camera angle, art medium, textures, background.\n" +
-            "4. If system prompt and user request conflict on style, SYSTEM PROMPT wins.\n" +
-            "5. Keep under 600 characters.",
-        },
-        {
-          role: "user",
-          content:
-            `SYSTEM PROMPT (mandatory — apply every rule):\n${system}\n\n` +
-            `USER REQUEST:\n${user}\n\n` +
-            "Write the final Flux image prompt now:",
-        },
-      ],
+      nomask_roleplay: options.nomaskPrompt !== false,
+      messages,
     }),
   });
 
@@ -107,47 +73,32 @@ async function composeImagePrompt(userPrompt, systemPrompt, options = {}) {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error(text.slice(0, 200) || "Prompt composition failed");
+    throw new Error(text.slice(0, 200) || "Image prompt request failed");
   }
   if (!res.ok) {
-    throw new Error(data.error?.message || data.message || `Prompt composition HTTP ${res.status}`);
+    throw new Error(data.error?.message || data.message || `HTTP ${res.status}`);
   }
 
-  const composed = String(data.choices?.[0]?.message?.content || "")
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .replace(/^Prompt:\s*/i, "")
-    .trim();
-
-  if (composed.length < 12) {
-    throw new Error("Prompt composition returned empty text");
-  }
-  return composed.slice(0, 700);
+  const out = String(data.choices?.[0]?.message?.content || "").trim();
+  if (!out) throw new Error("Empty response from system prompt");
+  return out.slice(0, 1000);
 }
 
 async function generateImage(prompt, width = 1024, height = 1024, systemPrompt = "", options = {}) {
   const user = String(prompt || "").trim();
   if (!user) throw new Error("Image prompt is required");
 
-  let clean = user.slice(0, 700);
-  let composedBy = "user";
-  const system = String(systemPrompt || "").trim();
+  const finalPrompt =
+    options.useSystemPrompt && String(systemPrompt || "").trim()
+      ? await promptFromSystem(systemPrompt, user, options)
+      : user;
 
-  if (system) {
-    try {
-      clean = await composeImagePrompt(user, system, options);
-      composedBy = "system+ai";
-    } catch (err) {
-      console.warn("composeImagePrompt failed, using fallback:", err.message);
-      clean = buildImagePromptFallback(user, system);
-      composedBy = "system+fallback";
-    }
-  }
   const w = Math.min(1280, Math.max(256, Number(width) || 1024));
   const h = Math.min(1280, Math.max(256, Number(height) || 1024));
   const seed = Date.now() % 100000;
   const url =
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(clean)}` +
-    `?width=${w}&height=${h}&nologo=true&model=flux&enhance=true&seed=${seed}`;
+    `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}` +
+    `?width=${w}&height=${h}&nologo=true&model=flux&seed=${seed}`;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 90000);
   try {
@@ -162,10 +113,8 @@ async function generateImage(prompt, width = 1024, height = 1024, systemPrompt =
     return {
       url,
       dataUrl: `data:image/jpeg;base64,${b64}`,
-      prompt: clean,
+      prompt: finalPrompt,
       userPrompt: user,
-      systemPromptApplied: !!system,
-      composedBy,
       width: w,
       height: h,
     };
@@ -319,14 +268,6 @@ async function runHostingerTool(name, args) {
 function buildSystemPrompt(userPrompt, plugins) {
   const parts = [];
   if (userPrompt) parts.push(userPrompt);
-  parts.push(
-    "You are KelvinOz AI — a modern multimodal assistant like ChatGPT or Gemini. " +
-      "Be clear, helpful, and direct. Use markdown when useful. " +
-      "You can generate images with the generate_image tool whenever the user asks for a picture, photo, illustration, logo, art, or visual. " +
-      "Images are rendered using the user's SYSTEM PROMPT — server-side prompt composition applies every system rule before generation. " +
-      "When calling generate_image, pass the user's subject/scene in the prompt argument; system style is applied automatically. " +
-      "After generating, briefly describe the result. You can also use web search when enabled, analyze attached files/images, write and explain code, and use connected plugins."
-  );
   const list = Array.isArray(plugins) ? plugins : [];
   if (list.length) {
     parts.push("Enabled plugins:");
@@ -420,18 +361,12 @@ async function handleChat(req, res, body) {
 
   async function runAnyTool(name, args, emit) {
     if (name === "generate_image") {
-      const img = await generateImage(args.prompt, args.width, args.height, systemPrompt, {
-        model,
-        nomaskPrompt,
+      const img = await generateImage(args.prompt, args.width, args.height, "", {
+        useSystemPrompt: false,
       });
       const slim = { url: img.url, prompt: img.prompt, dataUrl: img.dataUrl };
       if (emit) emit({ type: "image", image: slim });
-      return JSON.stringify({
-        ok: true,
-        prompt: img.prompt,
-        url: img.url,
-        note: "Image generated. Tell the user the image is ready; the client will display it automatically from the tool result URL.",
-      });
+      return JSON.stringify({ ok: true, prompt: img.prompt, url: img.url });
     }
     return runHostingerToolAuthed(name, args);
   }
@@ -651,6 +586,7 @@ const server = http.createServer(async (req, res) => {
       const img = await generateImage(body?.prompt, body?.width, body?.height, systemPrompt, {
         model,
         nomaskPrompt,
+        useSystemPrompt: !!systemPrompt,
       });
       return sendJson(res, 200, img);
     } catch (err) {
