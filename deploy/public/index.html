@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
   <title>KelvinOz AI</title>
-  <link rel="stylesheet" href="/styles.css?v=4" />
+  <link rel="stylesheet" href="/styles.css?v=5" />
 </head>
 <body>
   <div id="overlay" class="overlay" hidden></div>
@@ -111,6 +111,15 @@
         spellcheck="false"
       ></textarea>
 
+      <div class="prompt-save-row">
+        <input id="prompt-name" class="prompt-name" type="text" placeholder="Prompt name" maxlength="80" />
+        <button type="button" id="prompt-save" class="prompt-save-btn">Save</button>
+      </div>
+      <p id="prompt-hint" class="prompt-hint" hidden></p>
+
+      <div class="saved-prompts-head">Saved prompts</div>
+      <div id="saved-prompts" class="saved-prompts"></div>
+
       <div class="toggles">
         <label class="toggle">
           <input type="checkbox" id="web-search" checked />
@@ -144,6 +153,6 @@
     </div>
   </section>
 
-  <script src="/app.js?v=4"></script>
+  <script src="/app.js?v=5"></script>
 </body>
 </html>

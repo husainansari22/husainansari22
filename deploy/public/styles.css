@@ -161,6 +161,126 @@ body {
   margin: 12px 0 0;
 }
 
+.prompt-save-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.prompt-name {
+  flex: 1;
+  border: 0;
+  border-radius: 12px;
+  background: #1c1c1c;
+  color: var(--text);
+  font: inherit;
+  padding: 12px 14px;
+  outline: none;
+  min-width: 0;
+}
+
+.prompt-name::placeholder { color: #8a8a8a; }
+
+.prompt-save-btn {
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  padding: 0 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.prompt-hint {
+  color: #9ad29a;
+  font-size: 0.88rem;
+  margin: 8px 0 0;
+}
+
+.saved-prompts-head {
+  margin: 22px 0 10px;
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.saved-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.saved-prompt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #141414;
+  border-radius: 12px;
+  padding: 8px 8px 8px 12px;
+}
+
+.saved-prompt.active {
+  outline: 1px solid #2f6fed;
+}
+
+.saved-prompt-main {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+  padding: 6px 0;
+}
+
+.saved-prompt-name {
+  display: block;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.saved-prompt-preview {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.saved-prompt-actions {
+  display: flex;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.saved-prompt-actions button {
+  border: 0;
+  background: transparent;
+  color: #9a9a9a;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.saved-prompt-actions button:hover { color: #fff; background: #222; }
+.saved-prompt-actions .prompt-del:hover { color: #ff6b6b; }
+
+.saved-prompts-empty {
+  color: var(--muted);
+  font-size: 0.92rem;
+  margin: 0;
+}
+
 .sidebar-bottom {
   display: flex;
   align-items: center;

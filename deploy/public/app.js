@@ -7,19 +7,171 @@ const sendBtn = document.getElementById("send");
 const errorEl = document.getElementById("error");
 const settingsEl = document.getElementById("settings");
 const systemEl = document.getElementById("system-prompt");
+const promptNameEl = document.getElementById("prompt-name");
+const promptSaveBtn = document.getElementById("prompt-save");
+const promptHintEl = document.getElementById("prompt-hint");
+const savedPromptsEl = document.getElementById("saved-prompts");
 const webSearchEl = document.getElementById("web-search");
 const nomaskPromptEl = document.getElementById("nomask-prompt");
 const streamEl = document.getElementById("stream");
 
 const STORE_KEY = "kelvinoz_chats_v2";
 const SETTINGS_KEY = "kelvinoz_settings_v2";
+const PROMPTS_KEY = "kelvinoz_saved_prompts_v1";
 
 let conversations = [];
 let activeId = null;
 let loading = false;
+let savedPrompts = [];
+let editingPromptId = null;
+let activePromptId = null;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function loadPrompts() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PROMPTS_KEY) || "[]");
+    savedPrompts = Array.isArray(raw) ? raw : [];
+  } catch {
+    savedPrompts = [];
+  }
+}
+
+function persistPrompts() {
+  localStorage.setItem(PROMPTS_KEY, JSON.stringify(savedPrompts));
+}
+
+function showPromptHint(msg) {
+  promptHintEl.hidden = !msg;
+  promptHintEl.textContent = msg || "";
+  if (msg) setTimeout(() => {
+    if (promptHintEl.textContent === msg) {
+      promptHintEl.hidden = true;
+    }
+  }, 2000);
+}
+
+function updateSaveButton() {
+  promptSaveBtn.textContent = editingPromptId ? "Update" : "Save";
+}
+
+function renderSavedPrompts() {
+  if (!savedPrompts.length) {
+    savedPromptsEl.innerHTML = `<p class="saved-prompts-empty">No saved prompts yet</p>`;
+    return;
+  }
+
+  savedPromptsEl.innerHTML = savedPrompts
+    .map((p) => {
+      const preview = (p.content || "").replace(/\s+/g, " ").trim();
+      return `
+      <div class="saved-prompt ${p.id === activePromptId ? "active" : ""}" data-id="${p.id}">
+        <button type="button" class="saved-prompt-main" data-action="use" data-id="${p.id}">
+          <span class="saved-prompt-name">${escapeHtml(p.name || "Untitled")}</span>
+          <span class="saved-prompt-preview">${escapeHtml(preview.slice(0, 80) || "Empty")}</span>
+        </button>
+        <div class="saved-prompt-actions">
+          <button type="button" data-action="edit" data-id="${p.id}" aria-label="Edit prompt" title="Edit">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
+          <button type="button" class="prompt-del" data-action="delete" data-id="${p.id}" aria-label="Delete prompt" title="Delete">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+          </button>
+        </div>
+      </div>`;
+    })
+    .join("");
+
+  savedPromptsEl.querySelectorAll("[data-action]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (action === "use") useSavedPrompt(id);
+      if (action === "edit") editSavedPrompt(id);
+      if (action === "delete") deleteSavedPrompt(id);
+    });
+  });
+}
+
+function useSavedPrompt(id) {
+  const p = savedPrompts.find((x) => x.id === id);
+  if (!p) return;
+  systemEl.value = p.content || "";
+  promptNameEl.value = p.name || "";
+  editingPromptId = null;
+  activePromptId = id;
+  updateSaveButton();
+  saveSettings();
+  renderSavedPrompts();
+  showPromptHint("Prompt selected");
+}
+
+function editSavedPrompt(id) {
+  const p = savedPrompts.find((x) => x.id === id);
+  if (!p) return;
+  systemEl.value = p.content || "";
+  promptNameEl.value = p.name || "";
+  editingPromptId = id;
+  activePromptId = id;
+  updateSaveButton();
+  saveSettings();
+  renderSavedPrompts();
+  systemEl.focus();
+  showPromptHint("Editing — tap Update to save changes");
+}
+
+function deleteSavedPrompt(id) {
+  savedPrompts = savedPrompts.filter((x) => x.id !== id);
+  if (editingPromptId === id) {
+    editingPromptId = null;
+    updateSaveButton();
+  }
+  if (activePromptId === id) activePromptId = null;
+  persistPrompts();
+  renderSavedPrompts();
+  showPromptHint("Prompt deleted");
+}
+
+function saveCurrentPrompt() {
+  const content = systemEl.value.trim();
+  if (!content) {
+    showPromptHint("Write a system prompt first");
+    return;
+  }
+  const name =
+    promptNameEl.value.trim() ||
+    content.split("\n").find((l) => l.trim())?.trim().slice(0, 48) ||
+    "Untitled";
+
+  if (editingPromptId) {
+    const p = savedPrompts.find((x) => x.id === editingPromptId);
+    if (p) {
+      p.name = name;
+      p.content = systemEl.value;
+      p.updatedAt = Date.now();
+    }
+    activePromptId = editingPromptId;
+    editingPromptId = null;
+    updateSaveButton();
+    showPromptHint("Prompt updated");
+  } else {
+    const item = {
+      id: uid(),
+      name,
+      content: systemEl.value,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    savedPrompts.unshift(item);
+    activePromptId = item.id;
+    showPromptHint("Prompt saved");
+  }
+
+  persistPrompts();
+  saveSettings();
+  renderSavedPrompts();
 }
 
 function load() {
@@ -29,15 +181,19 @@ function load() {
   } catch {
     conversations = [];
   }
+  loadPrompts();
   try {
     const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
     if (typeof s.systemPrompt === "string") systemEl.value = s.systemPrompt;
     if (typeof s.webSearch === "boolean") webSearchEl.checked = s.webSearch;
     if (typeof s.nomaskPrompt === "boolean") nomaskPromptEl.checked = s.nomaskPrompt;
     if (typeof s.stream === "boolean") streamEl.checked = s.stream;
+    if (typeof s.activePromptId === "string") activePromptId = s.activePromptId;
   } catch {}
   if (!conversations.length) newChat(false);
   else activeId = conversations[0].id;
+  updateSaveButton();
+  renderSavedPrompts();
 }
 
 function save() {
@@ -52,6 +208,7 @@ function saveSettings() {
       webSearch: webSearchEl.checked,
       nomaskPrompt: nomaskPromptEl.checked,
       stream: streamEl.checked,
+      activePromptId,
     })
   );
 }
@@ -79,8 +236,10 @@ function closeSidebar() {
 
 function openSettings() {
   closeSidebar();
+  closeSection();
   settingsEl.classList.add("is-open");
   settingsEl.setAttribute("aria-hidden", "false");
+  renderSavedPrompts();
   systemEl.focus();
 }
 
@@ -371,6 +530,14 @@ inputEl.addEventListener("keydown", (e) => {
 [systemEl, webSearchEl, nomaskPromptEl, streamEl].forEach((el) => {
   el.addEventListener("change", saveSettings);
   el.addEventListener("input", saveSettings);
+});
+
+promptSaveBtn.addEventListener("click", saveCurrentPrompt);
+promptNameEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    saveCurrentPrompt();
+  }
 });
 
 if (window.visualViewport) {
