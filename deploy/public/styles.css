@@ -305,13 +305,19 @@ body {
 .settings {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 100;
   background: #000;
-  display: flex;
+  display: none;
   flex-direction: column;
+  width: 100%;
   max-width: 780px;
   margin: 0 auto;
-  width: 100%;
+  height: 100dvh;
+  overflow: auto;
+}
+
+.settings.is-open {
+  display: flex !important;
 }
 
 .settings-top {

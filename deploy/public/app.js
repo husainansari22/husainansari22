@@ -79,11 +79,14 @@ function closeSidebar() {
 
 function openSettings() {
   closeSidebar();
-  settingsEl.hidden = false;
+  settingsEl.classList.add("is-open");
+  settingsEl.setAttribute("aria-hidden", "false");
+  systemEl.focus();
 }
 
 function closeSettings() {
-  settingsEl.hidden = true;
+  settingsEl.classList.remove("is-open");
+  settingsEl.setAttribute("aria-hidden", "true");
   saveSettings();
 }
 
@@ -297,6 +300,7 @@ overlay.addEventListener("click", closeSidebar);
 document.getElementById("new-chat").addEventListener("click", () => newChat(true));
 document.getElementById("new-chat-top").addEventListener("click", () => newChat(true));
 document.getElementById("open-settings").addEventListener("click", openSettings);
+document.getElementById("nav-system-prompt").addEventListener("click", openSettings);
 document.getElementById("settings-back").addEventListener("click", closeSettings);
 document.getElementById("more-btn").addEventListener("click", openSettings);
 
