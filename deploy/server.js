@@ -87,64 +87,231 @@ function serveFile(res, filePath) {
   });
 }
 
+const HOSTINGER_API_KEY =
+  process.env.HOSTINGER_API_KEY || RUNTIME.hostingerApiKey || "";
+const HOSTINGER_USERNAME = process.env.HOSTINGER_USERNAME || RUNTIME.hostingerUsername || "u343769360";
+const HOSTINGER_BASE = "https://developers.hostinger.com";
+
+const HOSTINGER_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "list_hostinger_domains",
+      description: "List domains/websites on the Hostinger account.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "deploy_to_hostinger",
+      description: "Deploy this KelvinOz app to a Hostinger domain the user owns.",
+      parameters: {
+        type: "object",
+        properties: {
+          domain: { type: "string", description: "Target domain, e.g. kelvinoz.com" },
+        },
+        required: ["domain"],
+      },
+    },
+  },
+];
+
+async function hostingerApi(endpoint, options = {}) {
+  const res = await fetch(`${HOSTINGER_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${HOSTINGER_API_KEY}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { message: text };
+  }
+  if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function runHostingerTool(name, args) {
+  if (!HOSTINGER_API_KEY) return JSON.stringify({ ok: false, error: "HOSTINGER_API_KEY not configured" });
+  if (name === "list_hostinger_domains") {
+    const data = await hostingerApi(`/api/hosting/v1/websites?username=${encodeURIComponent(HOSTINGER_USERNAME)}`);
+    const list = (data.data || []).map((w) => ({
+      domain: w.domain,
+      type: w.website_type,
+      root: w.root_directory,
+    }));
+    return JSON.stringify({ ok: true, domains: list });
+  }
+  if (name === "deploy_to_hostinger") {
+    const domain = String(args.domain || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, "")
+      .replace(/\/.*$/, "");
+    if (!domain) return JSON.stringify({ ok: false, error: "domain is required" });
+    return JSON.stringify({
+      ok: true,
+      message: `Hostinger plugin is ready for ${domain}. Ask the site owner to run a Hostinger deploy from the dashboard/scripts, or provide deploy credentials in chat for guided steps.`,
+      domain,
+    });
+  }
+  return JSON.stringify({ ok: false, error: "Unknown tool" });
+}
+
+function buildSystemPrompt(userPrompt, plugins) {
+  const parts = [];
+  if (userPrompt) parts.push(userPrompt);
+  const list = Array.isArray(plugins) ? plugins : [];
+  if (list.length) {
+    parts.push("Enabled plugins:");
+    for (const p of list) {
+      parts.push(`- ${p.name || p.id}: ${p.instruction || "Assist with this plugin."}`);
+    }
+  }
+  return parts.join("\n\n");
+}
+
 async function handleChat(req, res, body) {
   const apiKey = NOMASK_API_KEY;
   if (!apiKey) return sendJson(res, 401, { error: "Missing NoMask API key" });
 
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const systemPrompt = typeof body?.systemPrompt === "string" ? body.systemPrompt.trim() : "";
+  const plugins = Array.isArray(body?.plugins) ? body.plugins : [];
   const webSearch = body?.webSearch ? "on" : "off";
   const nomaskPrompt = Boolean(body?.nomaskPrompt);
   const stream = body?.stream !== false;
+  const hostingerEnabled = plugins.some((p) => String(p.id || "").startsWith("hostinger"));
 
   const conversation = [];
-  if (systemPrompt) {
-    conversation.push({ role: "system", content: systemPrompt });
+  const mergedSystem = buildSystemPrompt(systemPrompt, plugins);
+  if (mergedSystem) {
+    conversation.push({ role: "system", content: mergedSystem });
   }
   for (const m of messages) {
-    if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
+    if (!m || (m.role !== "user" && m.role !== "assistant" && m.role !== "tool")) continue;
     if (m.content == null || m.content === "") continue;
-    if (typeof m.content === "string") {
-      conversation.push({ role: m.role, content: m.content });
-    } else if (Array.isArray(m.content)) {
-      conversation.push({ role: m.role, content: m.content });
+    if (typeof m.content === "string" || Array.isArray(m.content)) {
+      const msg = { role: m.role, content: m.content };
+      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+      if (m.tool_calls) msg.tool_calls = m.tool_calls;
+      conversation.push(msg);
     }
   }
 
-  const payload = {
-    model: MODEL,
-    messages: conversation,
-    web_search: webSearch,
-    nomask_roleplay: nomaskPrompt,
-    stream,
-  };
-
-  const upstream = await fetch(`${NOMASK_BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!stream) {
-    const text = await upstream.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      return sendJson(res, 502, { error: text.slice(0, 500) || `HTTP ${upstream.status}` });
-    }
-    if (!upstream.ok) {
-      return sendJson(res, upstream.status, {
-        error: data.error?.message || data.message || `HTTP ${upstream.status}`,
-      });
-    }
-    return sendJson(res, 200, {
-      content: data.choices?.[0]?.message?.content || "",
+  async function callNomask({ streamMode, withTools }) {
+    return fetch(`${NOMASK_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: conversation,
+        web_search: webSearch,
+        nomask_roleplay: nomaskPrompt,
+        stream: streamMode,
+        ...(withTools && hostingerEnabled ? { tools: HOSTINGER_TOOLS, tool_choice: "auto" } : {}),
+      }),
     });
   }
+
+  // Non-stream path
+  if (!stream) {
+    let rounds = 0;
+    while (rounds < 4) {
+      rounds += 1;
+      const upstream = await callNomask({ streamMode: false, withTools: hostingerEnabled });
+      const text = await upstream.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        return sendJson(res, 502, { error: text.slice(0, 500) || `HTTP ${upstream.status}` });
+      }
+      if (!upstream.ok) {
+        return sendJson(res, upstream.status, {
+          error: data.error?.message || data.message || `HTTP ${upstream.status}`,
+        });
+      }
+      const message = data.choices?.[0]?.message || {};
+      const toolCalls = message.tool_calls || [];
+      if (hostingerEnabled && toolCalls.length) {
+        conversation.push({
+          role: "assistant",
+          content: message.content || null,
+          tool_calls: toolCalls,
+        });
+        for (const tc of toolCalls) {
+          let args = {};
+          try {
+            args = JSON.parse(tc.function?.arguments || "{}");
+          } catch {}
+          const result = await runHostingerTool(tc.function?.name, args);
+          conversation.push({
+            role: "tool",
+            tool_call_id: tc.id,
+            content: result,
+          });
+        }
+        continue;
+      }
+      return sendJson(res, 200, { content: message.content || "" });
+    }
+    return sendJson(res, 200, { content: "" });
+  }
+
+  // Stream path (tools first non-stream if needed, then stream final)
+  if (hostingerEnabled) {
+    for (let round = 0; round < 4; round++) {
+      const upstreamTools = await callNomask({ streamMode: false, withTools: true });
+      const text = await upstreamTools.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        break;
+      }
+      if (!upstreamTools.ok) break;
+      const message = data.choices?.[0]?.message || {};
+      const toolCalls = message.tool_calls || [];
+      if (!toolCalls.length) {
+        if (message.content) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+          });
+          res.write(`data: ${JSON.stringify({ type: "content", delta: message.content })}\n\n`);
+          res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+          return res.end();
+        }
+        break;
+      }
+      conversation.push({
+        role: "assistant",
+        content: message.content || null,
+        tool_calls: toolCalls,
+      });
+      for (const tc of toolCalls) {
+        let args = {};
+        try {
+          args = JSON.parse(tc.function?.arguments || "{}");
+        } catch {}
+        const result = await runHostingerTool(tc.function?.name, args);
+        conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
+      }
+    }
+  }
+
+  const upstream = await callNomask({ streamMode: true, withTools: false });
 
   if (!upstream.ok) {
     const text = await upstream.text();

@@ -21,6 +21,8 @@ const attachPreviews = document.getElementById("attach-previews");
 const STORE_KEY = "kelvinoz_chats_v2";
 const SETTINGS_KEY = "kelvinoz_settings_v2";
 const PROMPTS_KEY = "kelvinoz_saved_prompts_v1";
+const PLUGINS_KEY = "kelvinoz_installed_plugins_v1";
+const PROJECTS_KEY = "kelvinoz_projects_v1";
 
 let conversations = [];
 let activeId = null;
@@ -29,6 +31,10 @@ let savedPrompts = [];
 let editingPromptId = null;
 let activePromptId = null;
 let pendingAttachments = [];
+let installedPlugins = [];
+let projects = [];
+let currentSection = null;
+let pluginQuery = "";
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -196,6 +202,7 @@ function load() {
   } catch {}
   if (!conversations.length) newChat(false);
   else activeId = conversations[0].id;
+  loadExtra();
   updateSaveButton();
   renderSavedPrompts();
 }
@@ -285,14 +292,54 @@ function deleteChat(id, e) {
   render();
 }
 
-function openSection(title) {
+function loadExtra() {
+  try {
+    installedPlugins = JSON.parse(localStorage.getItem(PLUGINS_KEY) || "[]");
+    if (!Array.isArray(installedPlugins)) installedPlugins = [];
+  } catch {
+    installedPlugins = [];
+  }
+  try {
+    projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
+    if (!Array.isArray(projects)) projects = [];
+  } catch {
+    projects = [];
+  }
+}
+
+function persistPlugins() {
+  localStorage.setItem(PLUGINS_KEY, JSON.stringify(installedPlugins));
+}
+
+function persistProjects() {
+  localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+}
+
+function pluginCatalog() {
+  return Array.isArray(window.KELVINOZ_PLUGINS) ? window.KELVINOZ_PLUGINS : [];
+}
+
+function getInstalledPluginObjects() {
+  const map = new Map(pluginCatalog().map((p) => [p.id, p]));
+  return installedPlugins.map((id) => map.get(id)).filter(Boolean);
+}
+
+function openSection(key) {
+  const titles = {
+    library: "Library",
+    projects: "Projects",
+    plugins: "Plugins",
+    codex: "Codex",
+    images: "Images",
+  };
+  currentSection = key;
   closeSidebar();
   closeSettings();
   const page = document.getElementById("section-page");
-  document.getElementById("section-title").textContent = title;
-  document.getElementById("section-body").textContent = `${title} — coming soon.`;
+  document.getElementById("section-title").textContent = titles[key] || key;
   page.classList.add("is-open");
   page.setAttribute("aria-hidden", "false");
+  renderSection();
 }
 
 function closeSection() {
@@ -300,6 +347,321 @@ function closeSection() {
   if (!page) return;
   page.classList.remove("is-open");
   page.setAttribute("aria-hidden", "true");
+  currentSection = null;
+}
+
+function renderSection() {
+  const body = document.getElementById("section-body");
+  if (!body || !currentSection) return;
+  if (currentSection === "library") return renderLibrary(body);
+  if (currentSection === "projects") return renderProjects(body);
+  if (currentSection === "plugins") return renderPlugins(body);
+  if (currentSection === "codex") return renderCodex(body);
+  if (currentSection === "images") return renderImages(body);
+  body.innerHTML = `<p class="section-empty">Unknown section</p>`;
+}
+
+function renderLibrary(body) {
+  const q = (pluginQuery || "").toLowerCase();
+  const list = conversations.filter((c) => !q || (c.title || "").toLowerCase().includes(q));
+  body.innerHTML = `
+    <input class="section-search" id="section-search" placeholder="Search chats" value="${escapeHtml(pluginQuery)}" />
+    <div class="section-group">Your chats</div>
+    <div id="section-list"></div>
+  `;
+  const listEl = body.querySelector("#section-list");
+  if (!list.length) {
+    listEl.innerHTML = `<p class="section-empty">No chats yet</p>`;
+  } else {
+    listEl.innerHTML = list
+      .map(
+        (c) => `
+      <div class="list-row">
+        <button type="button" class="open-row" data-open="${c.id}">
+          <div class="list-meta">
+            <strong>${escapeHtml(c.title || "New chat")}</strong>
+            <span>${(c.messages || []).length} messages</span>
+          </div>
+        </button>
+        <div class="list-actions">
+          <button type="button" class="recent-delete" data-del="${c.id}" aria-label="Delete">🗑</button>
+        </div>
+      </div>`
+      )
+      .join("");
+  }
+  body.querySelector("#section-search").addEventListener("input", (e) => {
+    pluginQuery = e.target.value;
+    renderSection();
+  });
+  listEl.querySelectorAll("[data-open]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setActive(btn.dataset.open);
+      closeSection();
+    });
+  });
+  listEl.querySelectorAll("[data-del]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      deleteChat(btn.dataset.del);
+      renderSection();
+    });
+  });
+}
+
+function renderProjects(body) {
+  body.innerHTML = `
+    <div class="project-form">
+      <input id="project-name" placeholder="New project name" />
+      <button type="button" id="project-add">Add</button>
+    </div>
+    <div class="section-group">Projects</div>
+    <div id="section-list"></div>
+  `;
+  const listEl = body.querySelector("#section-list");
+  if (!projects.length) {
+    listEl.innerHTML = `<p class="section-empty">No projects yet. Create one, then open a chat from Library.</p>`;
+  } else {
+    listEl.innerHTML = projects
+      .map((p) => {
+        const count = conversations.filter((c) => c.projectId === p.id).length;
+        return `
+        <div class="list-row">
+          <div class="list-meta">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span>${count} chats</span>
+          </div>
+          <div class="list-actions">
+            <button type="button" class="plugin-add" data-assign="${p.id}" title="Add current chat">+</button>
+            <button type="button" class="recent-delete" data-del-project="${p.id}" aria-label="Delete">🗑</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+  }
+  body.querySelector("#project-add").addEventListener("click", () => {
+    const name = body.querySelector("#project-name").value.trim();
+    if (!name) return;
+    projects.unshift({ id: uid(), name, createdAt: Date.now() });
+    persistProjects();
+    renderSection();
+  });
+  listEl.querySelectorAll("[data-assign]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const conv = getActive();
+      if (!conv) return;
+      conv.projectId = btn.dataset.assign;
+      save();
+      renderSection();
+    });
+  });
+  listEl.querySelectorAll("[data-del-project]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      projects = projects.filter((p) => p.id !== btn.dataset.delProject);
+      conversations.forEach((c) => {
+        if (c.projectId === btn.dataset.delProject) delete c.projectId;
+      });
+      persistProjects();
+      save();
+      renderSection();
+    });
+  });
+}
+
+function renderPlugins(body) {
+  const q = (pluginQuery || "").toLowerCase();
+  const installed = getInstalledPluginObjects();
+  const available = pluginCatalog().filter(
+    (p) =>
+      (!q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)) &&
+      !installedPlugins.includes(p.id)
+  );
+
+  body.innerHTML = `
+    <input class="section-search" id="section-search" placeholder="Search plugins" value="${escapeHtml(pluginQuery)}" />
+    <div class="section-group">Installed</div>
+    <div id="installed-wrap"></div>
+    <div class="section-group">Public</div>
+    <div id="public-wrap"></div>
+  `;
+
+  const installedWrap = body.querySelector("#installed-wrap");
+  const publicWrap = body.querySelector("#public-wrap");
+
+  if (!installed.length) {
+    installedWrap.innerHTML = `<p class="section-empty">No plugins installed yet</p>`;
+  } else {
+    installedWrap.innerHTML = installed
+      .map(
+        (p) => `
+      <div class="plugin-row">
+        <div class="plugin-icon" style="background:${p.color}">${escapeHtml(p.name.slice(0, 1))}</div>
+        <div class="plugin-meta">
+          <strong>${escapeHtml(p.name)}</strong>
+          <span>${escapeHtml(p.description)}</span>
+        </div>
+        <button type="button" class="plugin-add on" data-remove="${p.id}" aria-label="Remove plugin">✓</button>
+      </div>`
+      )
+      .join("");
+  }
+
+  if (!available.length) {
+    publicWrap.innerHTML = `<p class="section-empty">No matching plugins</p>`;
+  } else {
+    publicWrap.innerHTML = available
+      .map(
+        (p) => `
+      <div class="plugin-row">
+        <div class="plugin-icon" style="background:${p.color}">${escapeHtml(p.name.slice(0, 1))}</div>
+        <div class="plugin-meta">
+          <strong>${escapeHtml(p.name)}</strong>
+          <span>${escapeHtml(p.description)}</span>
+        </div>
+        <button type="button" class="plugin-add" data-add="${p.id}" aria-label="Add plugin">+</button>
+      </div>`
+      )
+      .join("");
+  }
+
+  body.querySelector("#section-search").addEventListener("input", (e) => {
+    pluginQuery = e.target.value;
+    renderSection();
+  });
+  body.querySelectorAll("[data-add]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (!installedPlugins.includes(btn.dataset.add)) {
+        installedPlugins.unshift(btn.dataset.add);
+        persistPlugins();
+        renderSection();
+      }
+    });
+  });
+  body.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      installedPlugins = installedPlugins.filter((id) => id !== btn.dataset.remove);
+      persistPlugins();
+      renderSection();
+    });
+  });
+}
+
+function renderCodex(body) {
+  const snippets = [];
+  for (const c of conversations) {
+    for (const m of c.messages || []) {
+      if (m.role !== "assistant" || !m.content) continue;
+      const blocks = String(m.content).match(/```[\s\S]*?```/g) || [];
+      blocks.forEach((b, i) => {
+        snippets.push({
+          id: `${c.id}-${i}`,
+          chatId: c.id,
+          title: c.title || "New chat",
+          code: b.replace(/^```[a-zA-Z0-9_-]*\n?/, "").replace(/```$/, "").trim(),
+        });
+      });
+    }
+  }
+
+  body.innerHTML = `
+    <div class="section-group">Scratchpad</div>
+    <textarea id="codex-pad" class="codex-box" placeholder="// Write or paste code here"></textarea>
+    <div class="project-form" style="margin-top:10px">
+      <button type="button" id="codex-to-chat" style="width:100%;padding:12px">Send scratchpad to chat</button>
+    </div>
+    <div class="section-group">Code from chats</div>
+    <div id="section-list"></div>
+  `;
+
+  try {
+    body.querySelector("#codex-pad").value = localStorage.getItem("kelvinoz_codex_pad") || "";
+  } catch {}
+
+  body.querySelector("#codex-pad").addEventListener("input", (e) => {
+    try {
+      localStorage.setItem("kelvinoz_codex_pad", e.target.value);
+    } catch {}
+  });
+
+  body.querySelector("#codex-to-chat").addEventListener("click", () => {
+    const code = body.querySelector("#codex-pad").value.trim();
+    if (!code) return;
+    closeSection();
+    inputEl.value = `Review and improve this code:\n\n\`\`\`\n${code}\n\`\`\``;
+    resizeInput();
+    inputEl.focus();
+  });
+
+  const listEl = body.querySelector("#section-list");
+  if (!snippets.length) {
+    listEl.innerHTML = `<p class="section-empty">No code blocks in chats yet</p>`;
+  } else {
+    listEl.innerHTML = snippets
+      .slice(0, 30)
+      .map(
+        (s) => `
+      <div class="list-row">
+        <button type="button" class="open-row" data-open="${s.chatId}">
+          <div class="list-meta">
+            <strong>${escapeHtml(s.title)}</strong>
+            <span>${escapeHtml(s.code.slice(0, 80))}</span>
+          </div>
+        </button>
+      </div>`
+      )
+      .join("");
+    listEl.querySelectorAll("[data-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        setActive(btn.dataset.open);
+        closeSection();
+      });
+    });
+  }
+}
+
+function renderImages(body) {
+  const images = [];
+  for (const c of conversations) {
+    for (const m of c.messages || []) {
+      for (const f of m.attachments || []) {
+        if ((f.kind === "image" || f.kind === "video") && f.dataUrl) {
+          images.push({ ...f, chatId: c.id, title: c.title || "New chat" });
+        }
+      }
+    }
+  }
+
+  body.innerHTML = `
+    <div class="project-form">
+      <button type="button" id="images-upload" style="width:100%;padding:12px">Add photos or videos</button>
+    </div>
+    <div class="section-group">Gallery</div>
+    <div id="section-list" class="image-grid"></div>
+  `;
+
+  body.querySelector("#images-upload").addEventListener("click", () => {
+    closeSection();
+    fileInput.click();
+  });
+
+  const listEl = body.querySelector("#section-list");
+  if (!images.length) {
+    listEl.className = "";
+    listEl.innerHTML = `<p class="section-empty">No images yet. Attach photos in chat or tap Add.</p>`;
+    return;
+  }
+  listEl.innerHTML = images
+    .map((img) =>
+      img.kind === "video"
+        ? `<video src="${img.dataUrl}" controls></video>`
+        : `<img src="${img.dataUrl}" alt="${escapeHtml(img.name || "image")}" data-open="${img.chatId}" />`
+    )
+    .join("");
+  listEl.querySelectorAll("[data-open]").forEach((el) => {
+    el.addEventListener("click", () => {
+      setActive(el.dataset.open);
+      closeSection();
+    });
+  });
 }
 
 function iconBtn(label, path) {
@@ -616,6 +978,11 @@ async function sendMessage() {
         webSearch: webSearchEl.checked,
         nomaskPrompt: nomaskPromptEl.checked,
         stream: streamEl.checked,
+        plugins: getInstalledPluginObjects().map((p) => ({
+          id: p.id,
+          name: p.name,
+          instruction: p.instruction,
+        })),
       }),
     });
 
@@ -694,15 +1061,14 @@ document.getElementById("more-btn").addEventListener("click", openSettings);
 
 document.querySelectorAll(".nav-item[data-nav]").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const labels = {
-      library: "Library",
-      projects: "Projects",
-      plugins: "Plugins",
-      codex: "Codex",
-      images: "Images",
-    };
-    openSection(labels[btn.dataset.nav] || btn.dataset.nav);
+    pluginQuery = "";
+    openSection(btn.dataset.nav);
   });
+});
+
+document.getElementById("section-settings").addEventListener("click", () => {
+  closeSection();
+  openSettings();
 });
 
 sendBtn.addEventListener("click", sendMessage);
