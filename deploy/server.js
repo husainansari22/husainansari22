@@ -35,7 +35,7 @@ const MIME = {
   ".ico": "image/x-icon",
 };
 
-function readBody(req, maxBytes = 2 * 1024 * 1024) {
+function readBody(req, maxBytes = 25 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -104,7 +104,11 @@ async function handleChat(req, res, body) {
   for (const m of messages) {
     if (!m || (m.role !== "user" && m.role !== "assistant")) continue;
     if (m.content == null || m.content === "") continue;
-    conversation.push({ role: m.role, content: String(m.content) });
+    if (typeof m.content === "string") {
+      conversation.push({ role: m.role, content: m.content });
+    } else if (Array.isArray(m.content)) {
+      conversation.push({ role: m.role, content: m.content });
+    }
   }
 
   const payload = {

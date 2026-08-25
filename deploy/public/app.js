@@ -14,6 +14,9 @@ const savedPromptsEl = document.getElementById("saved-prompts");
 const webSearchEl = document.getElementById("web-search");
 const nomaskPromptEl = document.getElementById("nomask-prompt");
 const streamEl = document.getElementById("stream");
+const attachBtn = document.getElementById("attach-btn");
+const fileInput = document.getElementById("file-input");
+const attachPreviews = document.getElementById("attach-previews");
 
 const STORE_KEY = "kelvinoz_chats_v2";
 const SETTINGS_KEY = "kelvinoz_settings_v2";
@@ -25,6 +28,7 @@ let loading = false;
 let savedPrompts = [];
 let editingPromptId = null;
 let activePromptId = null;
+let pendingAttachments = [];
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -311,7 +315,36 @@ function renderMessages() {
     const el = document.createElement("div");
     el.className = `msg ${m.role}`;
     if (m.role === "user") {
-      el.textContent = m.content || "";
+      if (m.attachments?.length) {
+        const files = document.createElement("div");
+        files.className = "msg-files";
+        for (const f of m.attachments) {
+          if (f.kind === "image" && f.dataUrl) {
+            const img = document.createElement("img");
+            img.className = "msg-file-thumb";
+            img.src = f.dataUrl;
+            img.alt = f.name || "image";
+            files.appendChild(img);
+          } else if (f.kind === "video" && f.dataUrl) {
+            const vid = document.createElement("video");
+            vid.className = "msg-file-thumb";
+            vid.src = f.dataUrl;
+            vid.muted = true;
+            files.appendChild(vid);
+          } else {
+            const label = document.createElement("div");
+            label.className = "msg-file-label";
+            label.textContent = f.name || "file";
+            files.appendChild(label);
+          }
+        }
+        el.appendChild(files);
+      }
+      if (m.content) {
+        const text = document.createElement("div");
+        text.textContent = m.content;
+        el.appendChild(text);
+      }
     } else {
       const text = document.createElement("div");
       text.textContent = m.content || "";
@@ -336,6 +369,128 @@ function renderMessages() {
     messagesEl.appendChild(el);
   }
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function renderAttachPreviews() {
+  if (!pendingAttachments.length) {
+    attachPreviews.hidden = true;
+    attachPreviews.innerHTML = "";
+    return;
+  }
+  attachPreviews.hidden = false;
+  attachPreviews.innerHTML = pendingAttachments
+    .map((f, i) => {
+      if (f.kind === "image") {
+        return `<div class="attach-chip"><img src="${f.dataUrl}" alt=""/><button type="button" class="attach-remove" data-i="${i}" aria-label="Remove">×</button></div>`;
+      }
+      if (f.kind === "video") {
+        return `<div class="attach-chip"><video src="${f.dataUrl}" muted></video><button type="button" class="attach-remove" data-i="${i}" aria-label="Remove">×</button></div>`;
+      }
+      return `<div class="attach-chip"><span class="attach-name">${escapeHtml(f.name)}</span><button type="button" class="attach-remove" data-i="${i}" aria-label="Remove">×</button></div>`;
+    })
+    .join("");
+  attachPreviews.querySelectorAll(".attach-remove").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      pendingAttachments.splice(Number(btn.dataset.i), 1);
+      renderAttachPreviews();
+    });
+  });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+async function addFiles(fileList) {
+  const files = [...(fileList || [])];
+  for (const file of files) {
+    if (pendingAttachments.length >= 6) {
+      showError("Max 6 attachments");
+      break;
+    }
+    if (file.size > 12 * 1024 * 1024) {
+      showError(`${file.name} is too large (max 12MB)`);
+      continue;
+    }
+    const item = {
+      id: uid(),
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      kind: file.type.startsWith("image/")
+        ? "image"
+        : file.type.startsWith("video/")
+          ? "video"
+          : "file",
+    };
+    if (item.kind === "image" || item.kind === "video") {
+      item.dataUrl = await readFileAsDataUrl(file);
+    } else if (
+      file.type.startsWith("text/") ||
+      /\.(txt|md|json|js|ts|tsx|jsx|py|css|html|csv)$/i.test(file.name)
+    ) {
+      item.text = await readFileAsText(file);
+      item.kind = "text";
+    } else {
+      item.dataUrl = await readFileAsDataUrl(file);
+    }
+    pendingAttachments.push(item);
+  }
+  renderAttachPreviews();
+  fileInput.value = "";
+}
+
+function buildApiContent(text, attachments) {
+  const parts = [];
+  let body = text || "";
+  for (const f of attachments || []) {
+    if (f.kind === "image" && f.dataUrl) {
+      parts.push({ type: "image_url", image_url: { url: f.dataUrl } });
+    } else if (f.kind === "text" && f.text != null) {
+      body += `\n\n[Attached file: ${f.name}]\n${f.text}`;
+    } else if (f.kind === "video") {
+      body += `\n\n[Attached video: ${f.name}]`;
+    } else {
+      body += `\n\n[Attached file: ${f.name}]`;
+    }
+  }
+  if (parts.length) {
+    const content = [];
+    if (body.trim()) content.push({ type: "text", text: body.trim() });
+    content.push(...parts);
+    return content;
+  }
+  return body;
+}
+
+function toApiMessages(conv) {
+  return conv.messages
+    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
+    .slice(0, -1)
+    .map((m) => {
+      if (m.role === "user" && m.attachments?.length) {
+        return { role: "user", content: buildApiContent(m.content || "", m.attachments) };
+      }
+      return { role: m.role, content: m.content || "" };
+    })
+    .filter((m) => {
+      if (typeof m.content === "string") return m.content !== "";
+      return Array.isArray(m.content) && m.content.length > 0;
+    });
 }
 
 function renderRecents() {
@@ -388,7 +543,8 @@ function pinApp() {
 
 async function sendMessage() {
   const text = inputEl.value.trim();
-  if (!text || loading) return;
+  const attachments = [...pendingAttachments];
+  if ((!text && !attachments.length) || loading) return;
 
   showError("");
   let conv = getActive();
@@ -397,11 +553,31 @@ async function sendMessage() {
     conv = getActive();
   }
 
-  conv.messages.push({ role: "user", content: text });
+  const displayText =
+    text ||
+    (attachments.length === 1 ? `Sent ${attachments[0].name}` : `Sent ${attachments.length} files`);
+
+  // Store lighter attachment copies in chat history (keep dataUrl for images/videos preview)
+  const storedAttachments = attachments.map((f) => ({
+    id: f.id,
+    name: f.name,
+    type: f.type,
+    kind: f.kind,
+    dataUrl: f.kind === "image" || f.kind === "video" ? f.dataUrl : undefined,
+  }));
+
+  conv.messages.push({
+    role: "user",
+    content: text,
+    attachments: storedAttachments,
+    apiAttachments: attachments,
+  });
   if (conv.messages.filter((m) => m.role === "user").length === 1) {
-    conv.title = text.slice(0, 48);
+    conv.title = displayText.slice(0, 48);
   }
   conv.messages.push({ role: "assistant", content: "" });
+  pendingAttachments = [];
+  renderAttachPreviews();
   save();
   render();
 
@@ -413,15 +589,29 @@ async function sendMessage() {
   const assistantIndex = conv.messages.length - 1;
   let full = "";
 
+  const apiMessages = conv.messages
+    .slice(0, -1)
+    .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
+    .map((m) => {
+      if (m.role === "user") {
+        const files = m.apiAttachments || m.attachments || [];
+        return { role: "user", content: buildApiContent(m.content || "", files) };
+      }
+      return { role: "assistant", content: m.content || "" };
+    });
+
+  // Drop heavy apiAttachments after building request payload copy
+  for (const m of conv.messages) {
+    if (m.apiAttachments) delete m.apiAttachments;
+  }
+  save();
+
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: conv.messages
-          .slice(0, -1)
-          .filter((m) => m.role === "user" || (m.role === "assistant" && m.content))
-          .map((m) => ({ role: m.role, content: m.content })),
+        messages: apiMessages,
         systemPrompt: systemEl.value,
         webSearch: webSearchEl.checked,
         nomaskPrompt: nomaskPromptEl.checked,
@@ -481,9 +671,6 @@ async function sendMessage() {
   } catch (err) {
     if (!full) {
       conv.messages.pop();
-      if (conv.messages.length && conv.messages[conv.messages.length - 1].role === "user") {
-        // keep user message visible
-      }
       save();
       render();
     }
@@ -519,6 +706,12 @@ document.querySelectorAll(".nav-item[data-nav]").forEach((btn) => {
 });
 
 sendBtn.addEventListener("click", sendMessage);
+attachBtn.addEventListener("click", (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  fileInput.click();
+});
+fileInput.addEventListener("change", () => addFiles(fileInput.files));
 inputEl.addEventListener("input", resizeInput);
 inputEl.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) {
