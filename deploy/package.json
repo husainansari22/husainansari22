@@ -4,10 +4,6 @@
   "private": true,
   "main": "server.js",
   "scripts": {
-    "build": "node -e \"console.log('KelvinOz AI build ok')\"",
     "start": "node server.js"
-  },
-  "engines": {
-    "node": ">=18"
   }
 }
