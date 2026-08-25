@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>KelvinOz AI</title>
+  <link rel="stylesheet" href="/styles.css?v=9" />
+</head>
+<body>
+  <div id="overlay" class="overlay" aria-hidden="true"></div>
+
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="sidebar-top">
+      <div class="brand">
+        <span class="brand-mark">✦</span>
+        <div>
+          <strong>KelvinOz AI</strong>
+          <span>Uncensored coding</span>
+        </div>
+      </div>
+      <button type="button" id="sidebar-close" class="icon-round" aria-label="Close">✕</button>
+    </div>
+    <button type="button" id="new-chat-side" class="side-new">+ New chat</button>
+    <div id="conversations" class="conversations"></div>
+    <button type="button" id="logout" class="side-logout">Log out</button>
+  </aside>
+
+  <div class="app">
+    <header class="topbar">
+      <button type="button" id="menu-btn" class="icon-round menu-btn" aria-label="Menu">
+        <i></i><i></i>
+      </button>
+      <button type="button" id="model-btn" class="model-btn" aria-label="Model">
+        KelvinOz AI <span class="chev">▾</span>
+      </button>
+      <div class="top-actions">
+        <button type="button" id="new-chat" class="pill-actions" aria-label="New chat">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          <span class="dots">⋯</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="files-panel" class="files-panel" hidden>
+      <div class="files-head">
+        <strong>Files in this chat</strong>
+        <button type="button" id="files-close" class="icon-round sm">✕</button>
+      </div>
+      <div id="files-list" class="files-list"></div>
+    </div>
+
+    <main id="messages" class="messages">
+      <div id="welcome" class="welcome">
+        <div class="welcome-orb">✦</div>
+        <h1>Code anything.</h1>
+        <p>Uncensored AI · deploy to any Hostinger domain</p>
+        <div class="chips">
+          <button type="button" class="chip" data-prompt="Build a React landing page and save all files">Build a React landing page</button>
+          <button type="button" class="chip" data-prompt="Write a Node.js API with auth and save the files">Write a Node.js API with auth</button>
+          <button type="button" class="chip" data-prompt="List my Hostinger domains">List my Hostinger domains</button>
+        </div>
+      </div>
+    </main>
+
+    <div id="error" class="error-bar" hidden></div>
+
+    <footer class="composer">
+      <div id="attachments" class="attachments" hidden></div>
+      <div class="composer-pill">
+        <button type="button" id="attach-btn" class="plus" aria-label="Attach">+</button>
+        <input id="file-input" type="file" accept="image/*,video/*,.txt,.js,.ts,.tsx,.jsx,.py,.json,.md,.css,.html,.zip,.pdf" multiple hidden />
+        <textarea id="input" rows="1" placeholder="Ask KelvinOz AI"></textarea>
+        <button type="button" id="files-toggle" class="files-mini" hidden><span id="files-count">0</span></button>
+        <button type="button" id="send" class="send" aria-label="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4l-1.4 1.4 5.6 5.6H4v2h12.2l-5.6 5.6L12 20l8-8-8-8z" transform="rotate(-90 12 12)"/></svg>
+        </button>
+      </div>
+      <p class="disclaimer" hidden>KelvinOz AI can make mistakes.</p>
+    </footer>
+  </div>
+
+  <script src="/app.js?v=9"></script>
+</body>
+</html>

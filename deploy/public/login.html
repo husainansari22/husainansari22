@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KelvinOz AI — Access</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="auth-page">
+  <div class="auth-card">
+    <div class="logo">✦</div>
+    <p class="brand">KelvinOz AI</p>
+    <h1>Private studio</h1>
+    <p class="subtitle">Enter your access code to continue.</p>
+    <form id="login-form">
+      <label for="code">Access code</label>
+      <input id="code" type="password" autocomplete="current-password" required autofocus />
+      <p id="error" class="error" hidden></p>
+      <button type="submit">Enter</button>
+    </form>
+    <p class="footer">kelvinoz.com · Uncensored AI</p>
+  </div>
+  <script>
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const error = document.getElementById("error");
+      error.hidden = true;
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: document.getElementById("code").value }),
+      });
+      if (!res.ok) {
+        error.textContent = "Wrong access code.";
+        error.hidden = false;
+        return;
+      }
+      location.href = "/";
+    });
+  </script>
+</body>
+</html>
