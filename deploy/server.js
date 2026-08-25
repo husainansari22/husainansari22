@@ -25,25 +25,6 @@ const NOMASK_BASE_URL = (
 ).replace(/\/$/, "");
 const MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "deepseek-v4-pro";
 
-const IMAGE_TOOLS = [
-  {
-    type: "function",
-    function: {
-      name: "generate_image",
-      description: "Generate an image.",
-      parameters: {
-        type: "object",
-        properties: {
-          prompt: { type: "string", description: "Image prompt" },
-          width: { type: "number" },
-          height: { type: "number" },
-        },
-        required: ["prompt"],
-      },
-    },
-  },
-];
-
 async function promptFromSystem(systemPrompt, userRequest, options = {}) {
   const system = String(systemPrompt || "").trim();
   const user = String(userRequest || "").trim();
@@ -99,31 +80,17 @@ async function generateImage(prompt, width = 1024, height = 1024, systemPrompt =
   const url =
     `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}` +
     `?width=${w}&height=${h}&nologo=true&model=flux&seed=${seed}`;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 90000);
-  try {
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: { Accept: "image/*" },
-    });
-    if (!res.ok) throw new Error(`Image generation failed (${res.status})`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length < 1000) throw new Error("Image generation returned empty data");
-    const b64 = buf.toString("base64");
-    return {
-      url,
-      dataUrl: `data:image/jpeg;base64,${b64}`,
-      prompt: finalPrompt,
-      userPrompt: user,
-      width: w,
-      height: h,
-    };
-  } catch (err) {
-    if (err.name === "AbortError") throw new Error("Image generation timed out");
-    throw err;
-  } finally {
-    clearTimeout(timer);
-  }
+
+  // Return URL immediately — Hostinger gateways time out if we wait to download.
+  // Browser loads the image from Pollinations directly.
+  return {
+    url,
+    dataUrl: url,
+    prompt: finalPrompt,
+    userPrompt: user,
+    width: w,
+    height: h,
+  };
 }
 
 const MIME = {
@@ -291,7 +258,25 @@ async function handleChat(req, res, body) {
   const hostingerEnabled = plugins.some((p) => String(p.id || "").startsWith("hostinger"));
   const hostingerKey = String(body?.hostingerApiKey || HOSTINGER_API_KEY || "").trim();
   const model = String(body?.model || MODEL).trim() || MODEL;
-  const tools = [...IMAGE_TOOLS, ...(hostingerEnabled ? HOSTINGER_TOOLS : [])];
+  // Image creation is /api/image only — do not attach image tools on every chat
+  // (that caused Hostinger 504s from slow tool pre-rounds).
+  const tools = hostingerEnabled ? [...HOSTINGER_TOOLS] : [];
+
+  function startSse() {
+    if (res.headersSent) return;
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
+  }
+
+  function sse(obj) {
+    startSse();
+    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+  }
 
   async function hostingerApiAuthed(endpoint, options = {}) {
     if (!hostingerKey) throw new Error("Connect Hostinger with an API token first");
@@ -360,14 +345,6 @@ async function handleChat(req, res, body) {
   }
 
   async function runAnyTool(name, args, emit) {
-    if (name === "generate_image") {
-      const img = await generateImage(args.prompt, args.width, args.height, "", {
-        useSystemPrompt: false,
-      });
-      const slim = { url: img.url, prompt: img.prompt, dataUrl: img.dataUrl };
-      if (emit) emit({ type: "image", image: slim });
-      return JSON.stringify({ ok: true, prompt: img.prompt, url: img.url });
-    }
     return runHostingerToolAuthed(name, args);
   }
 
@@ -384,7 +361,7 @@ async function handleChat(req, res, body) {
         web_search: webSearch,
         nomask_roleplay: nomaskPrompt,
         stream: streamMode,
-        ...(withTools ? { tools, tool_choice: "auto" } : {}),
+        ...(withTools && tools.length ? { tools, tool_choice: "auto" } : {}),
       }),
     });
   }
@@ -395,7 +372,7 @@ async function handleChat(req, res, body) {
     let rounds = 0;
     while (rounds < 4) {
       rounds += 1;
-      const upstream = await callNomask({ streamMode: false, withTools: true });
+      const upstream = await callNomask({ streamMode: false, withTools: tools.length > 0 });
       const text = await upstream.text();
       let data;
       try {
@@ -409,7 +386,7 @@ async function handleChat(req, res, body) {
         });
       }
       const message = data.choices?.[0]?.message || {};
-      const toolCalls = message.tool_calls || [];
+      const toolCalls = tools.length ? message.tool_calls || [] : [];
       if (toolCalls.length) {
         conversation.push({
           role: "assistant",
@@ -421,9 +398,7 @@ async function handleChat(req, res, body) {
           try {
             args = JSON.parse(tc.function?.arguments || "{}");
           } catch {}
-          const result = await runAnyTool(tc.function?.name, args, (evt) => {
-            if (evt?.type === "image" && evt.image) collectedImages.push(evt.image);
-          });
+          const result = await runAnyTool(tc.function?.name, args);
           conversation.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -440,58 +415,50 @@ async function handleChat(req, res, body) {
     return sendJson(res, 200, { content: "", images: collectedImages });
   }
 
-  // Stream path: resolve tools first, then stream final answer
+  // Stream path — open SSE immediately so Hostinger does not 504
+  startSse();
+  sse({ type: "status", message: "thinking" });
+
   const pendingImages = [];
-  for (let round = 0; round < 4; round++) {
-    const upstreamTools = await callNomask({ streamMode: false, withTools: true });
-    const text = await upstreamTools.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      break;
-    }
-    if (!upstreamTools.ok) {
-      return sendJson(res, upstreamTools.status, {
-        error: data.error?.message || data.message || `HTTP ${upstreamTools.status}`,
-      });
-    }
-    const message = data.choices?.[0]?.message || {};
-    const toolCalls = message.tool_calls || [];
-    if (!toolCalls.length) {
-      if (message.content && !pendingImages.length) {
-        // no tools — fall through to stream for nicer UX
+  if (tools.length) {
+    for (let round = 0; round < 3; round++) {
+      const upstreamTools = await callNomask({ streamMode: false, withTools: true });
+      const text = await upstreamTools.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
         break;
       }
-      if (message.content) {
-        res.writeHead(200, {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache, no-transform",
-          Connection: "keep-alive",
-        });
-        for (const image of pendingImages) {
-          res.write(`data: ${JSON.stringify({ type: "image", image })}\n\n`);
-        }
-        res.write(`data: ${JSON.stringify({ type: "content", delta: message.content })}\n\n`);
-        res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+      if (!upstreamTools.ok) {
+        sse({ type: "error", error: data.error?.message || data.message || `HTTP ${upstreamTools.status}` });
+        sse({ type: "done" });
         return res.end();
       }
-      break;
-    }
-    conversation.push({
-      role: "assistant",
-      content: message.content || null,
-      tool_calls: toolCalls,
-    });
-    for (const tc of toolCalls) {
-      let args = {};
-      try {
-        args = JSON.parse(tc.function?.arguments || "{}");
-      } catch {}
-      const result = await runAnyTool(tc.function?.name, args, (evt) => {
-        if (evt?.type === "image" && evt.image) pendingImages.push(evt.image);
+      const message = data.choices?.[0]?.message || {};
+      const toolCalls = message.tool_calls || [];
+      if (!toolCalls.length) {
+        if (message.content) {
+          for (const image of pendingImages) sse({ type: "image", image });
+          sse({ type: "content", delta: message.content });
+          sse({ type: "done" });
+          return res.end();
+        }
+        break;
+      }
+      conversation.push({
+        role: "assistant",
+        content: message.content || null,
+        tool_calls: toolCalls,
       });
-      conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
+      for (const tc of toolCalls) {
+        let args = {};
+        try {
+          args = JSON.parse(tc.function?.arguments || "{}");
+        } catch {}
+        const result = await runAnyTool(tc.function?.name, args);
+        conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
+      }
     }
   }
 
@@ -504,17 +471,13 @@ async function handleChat(req, res, body) {
       const parsed = JSON.parse(text);
       friendly = parsed.error?.message || parsed.message || friendly;
     } catch {}
-    return sendJson(res, upstream.status, { error: friendly });
+    sse({ type: "error", error: friendly });
+    sse({ type: "done" });
+    return res.end();
   }
 
-  res.writeHead(200, {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-  });
-
   for (const image of pendingImages) {
-    res.write(`data: ${JSON.stringify({ type: "image", image })}\n\n`);
+    sse({ type: "image", image });
   }
 
   const reader = upstream.body.getReader();

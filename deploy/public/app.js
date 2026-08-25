@@ -289,6 +289,17 @@ function getActive() {
   return conversations.find((c) => c.id === activeId) || null;
 }
 
+function httpErrorMessage(res, data) {
+  const status = res.status;
+  if (status === 504 || status === 408) {
+    return "Request timed out (504). Try Stream ON, or a faster model like DeepSeek Flash / Qwen.";
+  }
+  if (status === 502 || status === 503) {
+    return data?.error || "Upstream AI is briefly unavailable. Try again.";
+  }
+  return data?.error || data?.message || `Error ${status}`;
+}
+
 function showError(msg) {
   errorEl.hidden = !msg;
   errorEl.textContent = msg || "";
@@ -1241,10 +1252,10 @@ async function sendMessage() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      if (!res.ok) throw new Error(httpErrorMessage(res, data));
       conv.messages[assistantIndex].pending = undefined;
       conv.messages[assistantIndex].images = [
-        { url: data.url, dataUrl: data.dataUrl, prompt: data.userPrompt || text },
+        { url: data.url, dataUrl: data.dataUrl || data.url, prompt: data.userPrompt || text },
       ];
       conv.messages[assistantIndex].content = "";
       save();
@@ -1301,7 +1312,7 @@ async function sendMessage() {
 
     if (!streamEl.checked) {
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
+      if (!res.ok) throw new Error(httpErrorMessage(res, data));
       full = data.content || "";
       conv.messages[assistantIndex].pending = undefined;
       conv.messages[assistantIndex].content = full;
@@ -1315,7 +1326,7 @@ async function sendMessage() {
 
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.error || `Error ${res.status}`);
+      throw new Error(httpErrorMessage(res, data));
     }
 
     const reader = res.body.getReader();
