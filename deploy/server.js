@@ -30,7 +30,7 @@ const IMAGE_TOOLS = [
     type: "function",
     function: {
       name: "generate_image",
-      description: "Generate an image from a text prompt and return an image URL the user can view.",
+      description: "Generate an image from a text prompt. Always apply the user's system prompt style, constraints, and visual rules to the image.",
       parameters: {
         type: "object",
         properties: {
@@ -44,8 +44,22 @@ const IMAGE_TOOLS = [
   },
 ];
 
-async function generateImage(prompt, width = 1024, height = 1024) {
-  const clean = String(prompt || "").trim().slice(0, 500);
+function buildImagePrompt(userPrompt, systemPrompt) {
+  const user = String(userPrompt || "").trim();
+  const system = String(systemPrompt || "").trim();
+  if (!user) throw new Error("Image prompt is required");
+  if (!system) return user.slice(0, 700);
+
+  const maxLen = 700;
+  const styleBudget = Math.min(280, Math.max(80, maxLen - user.length - 24));
+  const style =
+    system.length > styleBudget ? `${system.slice(0, styleBudget).trim()}…` : system;
+  const combined = `${user}. Follow these image rules from the system prompt: ${style}`;
+  return combined.slice(0, maxLen);
+}
+
+async function generateImage(prompt, width = 1024, height = 1024, systemPrompt = "") {
+  const clean = buildImagePrompt(prompt, systemPrompt);
   if (!clean) throw new Error("Image prompt is required");
   const w = Math.min(1280, Math.max(256, Number(width) || 1024));
   const h = Math.min(1280, Math.max(256, Number(height) || 1024));
@@ -68,6 +82,7 @@ async function generateImage(prompt, width = 1024, height = 1024) {
       url,
       dataUrl: `data:image/jpeg;base64,${b64}`,
       prompt: clean,
+      userPrompt: String(prompt || "").trim(),
       width: w,
       height: h,
     };
@@ -225,6 +240,8 @@ function buildSystemPrompt(userPrompt, plugins) {
     "You are KelvinOz AI — a modern multimodal assistant like ChatGPT or Gemini. " +
       "Be clear, helpful, and direct. Use markdown when useful. " +
       "You can generate images with the generate_image tool whenever the user asks for a picture, photo, illustration, logo, art, or visual. " +
+      "Every generated image must follow the system prompt above (style, tone, subject rules, and constraints). " +
+      "When calling generate_image, include those rules in the prompt argument. " +
       "After generating, briefly describe the result. You can also use web search when enabled, analyze attached files/images, write and explain code, and use connected plugins."
   );
   const list = Array.isArray(plugins) ? plugins : [];
@@ -320,7 +337,7 @@ async function handleChat(req, res, body) {
 
   async function runAnyTool(name, args, emit) {
     if (name === "generate_image") {
-      const img = await generateImage(args.prompt, args.width, args.height);
+      const img = await generateImage(args.prompt, args.width, args.height, systemPrompt);
       const slim = { url: img.url, prompt: img.prompt, dataUrl: img.dataUrl };
       if (emit) emit({ type: "image", image: slim });
       return JSON.stringify({
@@ -542,7 +559,8 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && pathname === "/api/image") {
     try {
       const body = await readBody(req);
-      const img = await generateImage(body?.prompt, body?.width, body?.height);
+      const systemPrompt = typeof body?.systemPrompt === "string" ? body.systemPrompt.trim() : "";
+      const img = await generateImage(body?.prompt, body?.width, body?.height, systemPrompt);
       return sendJson(res, 200, img);
     } catch (err) {
       return sendJson(res, 500, { error: err.message });

@@ -1240,15 +1240,21 @@ async function sendMessage() {
       const res = await fetch("/api/image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
+        body: JSON.stringify({
+          prompt: text,
+          systemPrompt: systemEl.value.trim(),
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || `Error ${res.status}`);
       conv.messages[assistantIndex].pending = undefined;
       conv.messages[assistantIndex].images = [
-        { url: data.url, dataUrl: data.dataUrl, prompt: data.prompt },
+        { url: data.url, dataUrl: data.dataUrl, prompt: data.userPrompt || data.prompt },
       ];
-      conv.messages[assistantIndex].content = `Here's an image for: **${data.prompt}**`;
+      const shown = data.userPrompt || text;
+      conv.messages[assistantIndex].content = systemEl.value.trim()
+        ? `Here's an image for: **${shown}** (using your system prompt style)`
+        : `Here's an image for: **${shown}**`;
       save();
       render();
       return;
