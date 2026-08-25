@@ -1195,7 +1195,13 @@ async function sendMessage() {
     conv = getActive();
   }
 
-  const wantImage = imageMode;
+  const wantImage =
+    imageMode ||
+    /\b(generate|create|draw|make|paint|render|show)\b[\s\S]{0,48}\b(image|photo|picture|pic|illustration|logo|artwork|art)\b/i.test(
+      text
+    ) ||
+    /\b(image|photo|picture|pic) of\b/i.test(text) ||
+    /^(draw|paint|sketch)\b/i.test(text);
 
   const displayText =
     text ||
