@@ -511,4 +511,42 @@ document.querySelectorAll(".chip").forEach((btn) => {
   onTap(btn, () => sendMessage(btn.dataset.prompt));
 });
 
+/* Pin entire app shell to the visual viewport so the composer
+   stays flush above the keyboard with no black gap. */
+const appEl = document.querySelector(".app");
+function pinAppToViewport() {
+  if (!appEl) return;
+  const vv = window.visualViewport;
+  if (!vv) {
+    appEl.style.top = "0px";
+    appEl.style.left = "0px";
+    appEl.style.width = "100%";
+    appEl.style.height = window.innerHeight + "px";
+    appEl.classList.remove("kb-open");
+    return;
+  }
+  appEl.style.top = Math.max(0, vv.offsetTop) + "px";
+  appEl.style.left = Math.max(0, vv.offsetLeft) + "px";
+  appEl.style.width = vv.width + "px";
+  appEl.style.height = vv.height + "px";
+
+  const keyboardOpen = window.innerHeight - vv.height > 80;
+  appEl.classList.toggle("kb-open", keyboardOpen);
+}
+
+pinAppToViewport();
+window.addEventListener("resize", pinAppToViewport);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", pinAppToViewport);
+  window.visualViewport.addEventListener("scroll", pinAppToViewport);
+}
+inputEl.addEventListener("focus", () => {
+  setTimeout(() => {
+    pinAppToViewport();
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }, 50);
+  setTimeout(pinAppToViewport, 300);
+});
+inputEl.addEventListener("blur", () => setTimeout(pinAppToViewport, 100));
+
 render();
