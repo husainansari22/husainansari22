@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kelvin API</title>
+  <link rel="stylesheet" href="/styles.css?v=20" />
+  <style>
+    .api-doc { max-width: 720px; margin: 0 auto; padding: 32px 20px 80px; }
+    .api-doc h1 { font-size: 1.8rem; margin: 0 0 8px; }
+    .api-doc p, .api-doc li { color: var(--muted); line-height: 1.55; }
+    .api-doc code, .api-doc pre {
+      font-family: var(--mono);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .api-doc code { padding: 2px 6px; font-size: 0.9em; }
+    .api-doc pre { padding: 14px 16px; overflow-x: auto; color: var(--text); }
+    .api-doc h2 { margin-top: 28px; font-size: 1.15rem; }
+    .back { color: var(--accent-2); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="api-doc">
+    <p><a class="back" href="/">← KelvinOz</a></p>
+    <h1>Kelvin API</h1>
+    <p>Your personal OpenAI-compatible API. The website talks only to Kelvin API — no third-party AI vendors on this server.</p>
+
+    <h2>Base URL</h2>
+    <pre>https://kelvinoz.com/v1</pre>
+
+    <h2>Auth</h2>
+    <pre>Authorization: Bearer YOUR_KELVIN_API_KEY</pre>
+
+    <h2>Chat</h2>
+    <pre>curl https://kelvinoz.com/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_KELVIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3.2",
+    "messages": [{"role":"user","content":"Hello"}],
+    "stream": false
+  }'</pre>
+
+    <h2>Images</h2>
+    <pre>curl https://kelvinoz.com/v1/images/generations \
+  -H "Authorization: Bearer YOUR_KELVIN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"a red apple","size":"1024x1024"}'</pre>
+
+    <h2>Models</h2>
+    <pre>curl https://kelvinoz.com/v1/models \
+  -H "Authorization: Bearer YOUR_KELVIN_API_KEY"</pre>
+
+    <h2>Your engine (required)</h2>
+    <p>Kelvin API does not call OpenAI or NoMask. It only talks to <strong>your</strong> model server:</p>
+    <ul>
+      <li><code>KELVIN_ENGINE_BASE_URL</code> — e.g. <code>http://YOUR_VPS_IP:11434/v1</code> (Ollama)</li>
+      <li><code>KELVIN_ENGINE_MODEL</code> — e.g. <code>llama3.2</code></li>
+      <li><code>KELVIN_IMAGE_ENGINE_URL</code> — your image server OpenAI-compatible base (optional)</li>
+      <li><code>KELVIN_API_KEY</code> — your personal API key</li>
+    </ul>
+    <p>Quick Ollama on a VPS you own:</p>
+    <pre>curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.2
+# Ollama serves OpenAI-compatible API at :11434/v1</pre>
+  </div>
+</body>
+</html>
