@@ -188,6 +188,57 @@ async function handleChat(req, res, body) {
   const nomaskPrompt = Boolean(body?.nomaskPrompt);
   const stream = body?.stream !== false;
   const hostingerEnabled = plugins.some((p) => String(p.id || "").startsWith("hostinger"));
+  const hostingerKey = String(body?.hostingerApiKey || HOSTINGER_API_KEY || "").trim();
+
+  async function hostingerApiAuthed(endpoint, options = {}) {
+    if (!hostingerKey) throw new Error("Connect Hostinger with an API token first");
+    const res = await fetch(`${HOSTINGER_BASE}${endpoint}`, {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${hostingerKey}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    const text = await res.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { message: text };
+    }
+    if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+    return data;
+  }
+
+  async function runHostingerToolAuthed(name, args) {
+    if (name === "list_hostinger_domains") {
+      const data = await hostingerApiAuthed(
+        `/api/hosting/v1/websites?username=${encodeURIComponent(HOSTINGER_USERNAME)}`
+      );
+      const list = (data.data || []).map((w) => ({
+        domain: w.domain,
+        type: w.website_type,
+        root: w.root_directory,
+      }));
+      return JSON.stringify({ ok: true, domains: list });
+    }
+    if (name === "deploy_to_hostinger") {
+      const domain = String(args.domain || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "");
+      if (!domain) return JSON.stringify({ ok: false, error: "domain is required" });
+      return JSON.stringify({
+        ok: true,
+        connected: true,
+        message: `Hostinger is connected. Domain target accepted: ${domain}. I can list websites and guide deploy steps with direct Hostinger API access.`,
+        domain,
+      });
+    }
+    return JSON.stringify({ ok: false, error: "Unknown tool" });
+  }
 
   const conversation = [];
   const mergedSystem = buildSystemPrompt(systemPrompt, plugins);
@@ -254,7 +305,7 @@ async function handleChat(req, res, body) {
           try {
             args = JSON.parse(tc.function?.arguments || "{}");
           } catch {}
-          const result = await runHostingerTool(tc.function?.name, args);
+          const result = await runHostingerToolAuthed(tc.function?.name, args);
           conversation.push({
             role: "tool",
             tool_call_id: tc.id,
@@ -305,7 +356,7 @@ async function handleChat(req, res, body) {
         try {
           args = JSON.parse(tc.function?.arguments || "{}");
         } catch {}
-        const result = await runHostingerTool(tc.function?.name, args);
+        const result = await runHostingerToolAuthed(tc.function?.name, args);
         conversation.push({ role: "tool", tool_call_id: tc.id, content: result });
       }
     }

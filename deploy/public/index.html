@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#000000" />
   <title>KelvinOz AI</title>
-  <link rel="stylesheet" href="/styles.css?v=7" />
+  <link rel="stylesheet" href="/styles.css?v=8" />
 </head>
 <body>
   <div id="overlay" class="overlay" hidden></div>
@@ -156,7 +156,28 @@
     <div id="section-body" class="settings-body section-body"></div>
   </section>
 
-  <script src="/plugins-data.js?v=7"></script>
-  <script src="/app.js?v=7"></script>
+  <div id="connect-modal" class="connect-modal" hidden>
+    <div class="connect-backdrop" id="connect-backdrop"></div>
+    <div class="connect-sheet" role="dialog" aria-modal="true" aria-labelledby="connect-title">
+      <button type="button" id="connect-close" class="connect-x" aria-label="Close">×</button>
+      <div class="connect-logos">
+        <div class="connect-logo kelvinoz" aria-hidden="true">K</div>
+        <div class="connect-dots" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="connect-logo plugin" id="connect-plugin-logo" aria-hidden="true">P</div>
+      </div>
+      <h2 id="connect-title">Connect plugin</h2>
+      <div class="connect-info">
+        <p><strong>You’re in control.</strong> KelvinOz AI respects your permissions. You can disconnect this app anytime.</p>
+        <p><strong>Apps may introduce elevated risk.</strong> Third-party apps can change over time. Review what you share before connecting.</p>
+        <p><strong>Data shared with this app:</strong> basic info needed for the connection, plus relevant chat context and intent so the plugin can help directly.</p>
+      </div>
+      <div id="connect-extra" class="connect-extra" hidden></div>
+      <button type="button" id="connect-continue" class="connect-continue">Continue</button>
+      <button type="button" id="connect-cancel" class="connect-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <script src="/plugins-data.js?v=8"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>

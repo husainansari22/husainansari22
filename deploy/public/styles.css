@@ -867,3 +867,176 @@ body {
   display: flex;
   gap: 4px;
 }
+
+.connect-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.connect-modal[hidden] { display: none !important; }
+
+.connect-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.62);
+}
+
+.connect-sheet {
+  position: relative;
+  width: min(520px, 100%);
+  background: #1a1a1a;
+  border-radius: 24px 24px 0 0;
+  padding: 18px 18px calc(18px + env(safe-area-inset-bottom));
+  z-index: 1;
+  max-height: 92dvh;
+  overflow: auto;
+}
+
+.connect-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 1.3rem;
+  cursor: pointer;
+}
+
+.connect-logos {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 10px 0 16px;
+}
+
+.connect-logo {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 1.2rem;
+  color: #fff;
+}
+
+.connect-logo.kelvinoz { background: #111; border: 1px solid #333; }
+.connect-logo.plugin { background: #673de6; }
+
+.connect-dots {
+  display: flex;
+  gap: 5px;
+}
+.connect-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #666;
+  display: block;
+}
+
+.connect-sheet h2 {
+  text-align: center;
+  margin: 0 0 14px;
+  font-size: 1.25rem;
+}
+
+.connect-info {
+  background: #111;
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #d6d6d6;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.connect-info p { margin: 0 0 12px; }
+.connect-info p:last-child { margin-bottom: 0; }
+.connect-info strong { color: #fff; }
+
+.connect-extra {
+  margin-top: 12px;
+}
+
+.connect-extra input {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: #111;
+  color: #fff;
+  padding: 14px;
+  font: inherit;
+  outline: none;
+}
+
+.connect-extra p {
+  color: #9a9a9a;
+  font-size: 0.85rem;
+  margin: 8px 0 0;
+}
+
+.connect-continue,
+.connect-cancel {
+  width: 100%;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 1rem;
+  padding: 14px 16px;
+  cursor: pointer;
+  margin-top: 12px;
+}
+
+.connect-continue {
+  background: #fff;
+  color: #000;
+}
+
+.connect-cancel {
+  background: #2a2a2a;
+  color: #fff;
+}
+
+.plugin-detail {
+  text-align: center;
+  padding: 8px 0 18px;
+}
+
+.plugin-detail-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  margin: 0 auto 14px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.plugin-detail h3 {
+  margin: 0 0 6px;
+  font-size: 1.35rem;
+}
+
+.plugin-detail p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.plugin-status {
+  display: inline-block;
+  margin-top: 10px;
+  color: #7dffa3;
+  font-size: 0.9rem;
+}

@@ -21,7 +21,7 @@ const attachPreviews = document.getElementById("attach-previews");
 const STORE_KEY = "kelvinoz_chats_v2";
 const SETTINGS_KEY = "kelvinoz_settings_v2";
 const PROMPTS_KEY = "kelvinoz_saved_prompts_v1";
-const PLUGINS_KEY = "kelvinoz_installed_plugins_v1";
+const PLUGINS_KEY = "kelvinoz_connected_plugins_v2";
 const PROJECTS_KEY = "kelvinoz_projects_v1";
 
 let conversations = [];
@@ -31,10 +31,11 @@ let savedPrompts = [];
 let editingPromptId = null;
 let activePromptId = null;
 let pendingAttachments = [];
-let installedPlugins = [];
+let connectedPlugins = []; // [{id, connectedAt, apiKey?}]
 let projects = [];
 let currentSection = null;
 let pluginQuery = "";
+let pendingConnectId = null;
 
 function uid() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
@@ -294,10 +295,15 @@ function deleteChat(id, e) {
 
 function loadExtra() {
   try {
-    installedPlugins = JSON.parse(localStorage.getItem(PLUGINS_KEY) || "[]");
-    if (!Array.isArray(installedPlugins)) installedPlugins = [];
+    const raw = JSON.parse(localStorage.getItem(PLUGINS_KEY) || "[]");
+    // migrate old string[] installs
+    if (Array.isArray(raw)) {
+      connectedPlugins = raw.map((item) =>
+        typeof item === "string" ? { id: item, connectedAt: Date.now() } : item
+      );
+    } else connectedPlugins = [];
   } catch {
-    installedPlugins = [];
+    connectedPlugins = [];
   }
   try {
     projects = JSON.parse(localStorage.getItem(PROJECTS_KEY) || "[]");
@@ -308,7 +314,7 @@ function loadExtra() {
 }
 
 function persistPlugins() {
-  localStorage.setItem(PLUGINS_KEY, JSON.stringify(installedPlugins));
+  localStorage.setItem(PLUGINS_KEY, JSON.stringify(connectedPlugins));
 }
 
 function persistProjects() {
@@ -319,9 +325,24 @@ function pluginCatalog() {
   return Array.isArray(window.KELVINOZ_PLUGINS) ? window.KELVINOZ_PLUGINS : [];
 }
 
+function isPluginConnected(id) {
+  return connectedPlugins.some((p) => p.id === id);
+}
+
+function getConnectedPlugin(id) {
+  return connectedPlugins.find((p) => p.id === id) || null;
+}
+
 function getInstalledPluginObjects() {
   const map = new Map(pluginCatalog().map((p) => [p.id, p]));
-  return installedPlugins.map((id) => map.get(id)).filter(Boolean);
+  return connectedPlugins.map((c) => {
+    const meta = map.get(c.id);
+    return meta ? { ...meta, apiKey: c.apiKey || "" } : null;
+  }).filter(Boolean);
+}
+
+function needsApiKey(plugin) {
+  return String(plugin.id || "").startsWith("hostinger");
 }
 
 function openSection(key) {
@@ -469,16 +490,17 @@ function renderProjects(body) {
 
 function renderPlugins(body) {
   const q = (pluginQuery || "").toLowerCase();
-  const installed = getInstalledPluginObjects();
+  const connected = getInstalledPluginObjects();
+  const connectedIds = new Set(connectedPlugins.map((p) => p.id));
   const available = pluginCatalog().filter(
     (p) =>
       (!q || p.name.toLowerCase().includes(q) || p.description.toLowerCase().includes(q)) &&
-      !installedPlugins.includes(p.id)
+      !connectedIds.has(p.id)
   );
 
   body.innerHTML = `
     <input class="section-search" id="section-search" placeholder="Search plugins" value="${escapeHtml(pluginQuery)}" />
-    <div class="section-group">Installed</div>
+    <div class="section-group">Connected</div>
     <div id="installed-wrap"></div>
     <div class="section-group">Public</div>
     <div id="public-wrap"></div>
@@ -487,19 +509,21 @@ function renderPlugins(body) {
   const installedWrap = body.querySelector("#installed-wrap");
   const publicWrap = body.querySelector("#public-wrap");
 
-  if (!installed.length) {
-    installedWrap.innerHTML = `<p class="section-empty">No plugins installed yet</p>`;
+  if (!connected.length) {
+    installedWrap.innerHTML = `<p class="section-empty">No plugins connected yet</p>`;
   } else {
-    installedWrap.innerHTML = installed
+    installedWrap.innerHTML = connected
       .map(
         (p) => `
       <div class="plugin-row">
         <div class="plugin-icon" style="background:${p.color}">${escapeHtml(p.name.slice(0, 1))}</div>
-        <div class="plugin-meta">
-          <strong>${escapeHtml(p.name)}</strong>
-          <span>${escapeHtml(p.description)}</span>
-        </div>
-        <button type="button" class="plugin-add on" data-remove="${p.id}" aria-label="Remove plugin">✓</button>
+        <button type="button" class="open-row" data-open-plugin="${p.id}">
+          <div class="plugin-meta">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span>Connected · ${escapeHtml(p.description)}</span>
+          </div>
+        </button>
+        <button type="button" class="plugin-add on" data-disconnect="${p.id}" aria-label="Disconnect">✓</button>
       </div>`
       )
       .join("");
@@ -513,11 +537,13 @@ function renderPlugins(body) {
         (p) => `
       <div class="plugin-row">
         <div class="plugin-icon" style="background:${p.color}">${escapeHtml(p.name.slice(0, 1))}</div>
-        <div class="plugin-meta">
-          <strong>${escapeHtml(p.name)}</strong>
-          <span>${escapeHtml(p.description)}</span>
-        </div>
-        <button type="button" class="plugin-add" data-add="${p.id}" aria-label="Add plugin">+</button>
+        <button type="button" class="open-row" data-open-plugin="${p.id}">
+          <div class="plugin-meta">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span>${escapeHtml(p.description)}</span>
+          </div>
+        </button>
+        <button type="button" class="plugin-add" data-connect="${p.id}" aria-label="Connect plugin">+</button>
       </div>`
       )
       .join("");
@@ -527,22 +553,100 @@ function renderPlugins(body) {
     pluginQuery = e.target.value;
     renderSection();
   });
-  body.querySelectorAll("[data-add]").forEach((btn) => {
+  body.querySelectorAll("[data-connect], [data-open-plugin]").forEach((btn) => {
     btn.addEventListener("click", () => {
-      if (!installedPlugins.includes(btn.dataset.add)) {
-        installedPlugins.unshift(btn.dataset.add);
-        persistPlugins();
-        renderSection();
-      }
+      const id = btn.dataset.connect || btn.dataset.openPlugin;
+      openPluginConnect(id);
     });
   });
-  body.querySelectorAll("[data-remove]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      installedPlugins = installedPlugins.filter((id) => id !== btn.dataset.remove);
-      persistPlugins();
+  body.querySelectorAll("[data-disconnect]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      disconnectPlugin(btn.dataset.disconnect);
       renderSection();
     });
   });
+}
+
+function openPluginConnect(id) {
+  const plugin = pluginCatalog().find((p) => p.id === id);
+  if (!plugin) return;
+  pendingConnectId = id;
+
+  const modal = document.getElementById("connect-modal");
+  const logo = document.getElementById("connect-plugin-logo");
+  const title = document.getElementById("connect-title");
+  const cont = document.getElementById("connect-continue");
+  const extra = document.getElementById("connect-extra");
+
+  logo.textContent = plugin.name.slice(0, 1);
+  logo.style.background = plugin.color || "#673de6";
+  title.textContent = `Connect ${plugin.name}`;
+  cont.textContent = `Continue to ${plugin.name}`;
+
+  const existing = getConnectedPlugin(id);
+  if (needsApiKey(plugin)) {
+    extra.hidden = false;
+    extra.innerHTML = `
+      <input id="connect-api-key" type="password" placeholder="Paste Hostinger API token" value="${escapeHtml(existing?.apiKey || "")}" />
+      <p>Get a token from hPanel → Profile → API. This stays on your device and is used for direct Hostinger access.</p>
+    `;
+  } else {
+    extra.hidden = true;
+    extra.innerHTML = "";
+  }
+
+  // Show detail header inside plugins section body too
+  if (currentSection === "plugins") {
+    const body = document.getElementById("section-body");
+    const detail = document.createElement("div");
+    detail.className = "plugin-detail";
+    detail.innerHTML = `
+      <div class="plugin-detail-icon" style="background:${plugin.color}">${escapeHtml(plugin.name.slice(0, 1))}</div>
+      <h3>${escapeHtml(plugin.name)}</h3>
+      <p>${escapeHtml(plugin.description)}</p>
+      ${existing ? `<div class="plugin-status">Connected</div>` : ""}
+    `;
+    // keep search list under modal; modal is the main connect UX
+  }
+
+  modal.hidden = false;
+}
+
+function closeConnectModal() {
+  document.getElementById("connect-modal").hidden = true;
+  pendingConnectId = null;
+}
+
+function disconnectPlugin(id) {
+  connectedPlugins = connectedPlugins.filter((p) => p.id !== id);
+  persistPlugins();
+}
+
+function confirmConnectPlugin() {
+  const plugin = pluginCatalog().find((p) => p.id === pendingConnectId);
+  if (!plugin) return closeConnectModal();
+
+  let apiKey = "";
+  if (needsApiKey(plugin)) {
+    const input = document.getElementById("connect-api-key");
+    apiKey = (input?.value || "").trim();
+    if (!apiKey) {
+      showError("Paste your Hostinger API token to connect");
+      return;
+    }
+  }
+
+  connectedPlugins = connectedPlugins.filter((p) => p.id !== plugin.id);
+  connectedPlugins.unshift({
+    id: plugin.id,
+    connectedAt: Date.now(),
+    ...(apiKey ? { apiKey } : {}),
+  });
+  persistPlugins();
+  closeConnectModal();
+  if (currentSection === "plugins") renderSection();
+  showError("");
 }
 
 function renderCodex(body) {
@@ -983,6 +1087,8 @@ async function sendMessage() {
           name: p.name,
           instruction: p.instruction,
         })),
+        hostingerApiKey:
+          getInstalledPluginObjects().find((p) => String(p.id).startsWith("hostinger"))?.apiKey || "",
       }),
     });
 
@@ -1070,6 +1176,11 @@ document.getElementById("section-settings").addEventListener("click", () => {
   closeSection();
   openSettings();
 });
+
+document.getElementById("connect-close").addEventListener("click", closeConnectModal);
+document.getElementById("connect-cancel").addEventListener("click", closeConnectModal);
+document.getElementById("connect-backdrop").addEventListener("click", closeConnectModal);
+document.getElementById("connect-continue").addEventListener("click", confirmConnectPlugin);
 
 sendBtn.addEventListener("click", sendMessage);
 attachBtn.addEventListener("click", (e) => {
