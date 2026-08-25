@@ -1218,7 +1218,11 @@ async function sendMessage() {
     role: "assistant",
     content: "",
     images: [],
-    pending: wantImage ? "Generating image…" : "Thinking…",
+    pending: wantImage
+      ? systemEl.value.trim()
+        ? "Applying system prompt & generating…"
+        : "Generating image…"
+      : "Thinking…",
   });
   pendingAttachments = [];
   setImageMode(false);
@@ -1243,6 +1247,8 @@ async function sendMessage() {
         body: JSON.stringify({
           prompt: text,
           systemPrompt: systemEl.value.trim(),
+          model: modelSelect?.value || "deepseek-v4-pro",
+          nomaskPrompt: nomaskPromptEl.checked,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1252,9 +1258,14 @@ async function sendMessage() {
         { url: data.url, dataUrl: data.dataUrl, prompt: data.userPrompt || data.prompt },
       ];
       const shown = data.userPrompt || text;
-      conv.messages[assistantIndex].content = systemEl.value.trim()
-        ? `Here's an image for: **${shown}** (using your system prompt style)`
-        : `Here's an image for: **${shown}**`;
+      if (data.systemPromptApplied && data.composedBy === "system+ai") {
+        conv.messages[assistantIndex].content =
+          `Here's **${shown}** — composed with your system prompt:\n\n> ${data.prompt}`;
+      } else if (data.systemPromptApplied) {
+        conv.messages[assistantIndex].content = `Here's an image for **${shown}** (system prompt applied)`;
+      } else {
+        conv.messages[assistantIndex].content = `Here's an image for: **${shown}**`;
+      }
       save();
       render();
       return;
