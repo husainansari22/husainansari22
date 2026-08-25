@@ -137,7 +137,7 @@ async function deployToHostinger(options = {}) {
     openaiApiKey: options.nomaskApiKey || options.openaiApiKey || process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY || "",
     nomaskApiKey: options.nomaskApiKey || options.openaiApiKey || process.env.NOMASK_API_KEY || process.env.OPENAI_API_KEY || "",
     nomaskBaseUrl: process.env.NOMASK_BASE_URL || "https://nomask.ai/api/v1",
-    nomaskModel: process.env.NOMASK_MODEL || "kimi-k2.7-code",
+    nomaskModel: process.env.NOMASK_MODEL || "deepseek-v4-flash",
     hostingerApiKey: apiKey,
   };
 

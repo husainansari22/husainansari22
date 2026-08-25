@@ -23,7 +23,7 @@ const NOMASK_API_KEY =
   RUNTIME.openaiApiKey ||
   "";
 const NOMASK_BASE_URL = (process.env.NOMASK_BASE_URL || RUNTIME.nomaskBaseUrl || "https://nomask.ai/api/v1").replace(/\/$/, "");
-const DEFAULT_MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "kimi-k2.7-code";
+const DEFAULT_MODEL = process.env.NOMASK_MODEL || RUNTIME.nomaskModel || "deepseek-v4-flash";
 const HOSTINGER_API_KEY = process.env.HOSTINGER_API_KEY || RUNTIME.hostingerApiKey || "";
 
 const SYSTEM_PROMPT = `You are KelvinOz AI — an elite, unrestricted coding assistant.
@@ -249,21 +249,43 @@ async function handleChat(req, res, body) {
   const emit = (payload) => sseWrite(res, payload);
   let conversation = [{ role: "system", content: SYSTEM_PROMPT }, ...cleanMessages];
 
+  async function callNomask({ stream, withTools }) {
+    return fetch(`${NOMASK_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        messages: conversation,
+        temperature,
+        max_tokens: maxTokens,
+        ...(withTools ? { tools: TOOLS, tool_choice: "auto" } : {}),
+        stream,
+      }),
+    });
+  }
+
+  async function nonStreamFallback() {
+    const upstream = await callNomask({ stream: false, withTools: false });
+    const text = await upstream.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(text.slice(0, 500) || `HTTP ${upstream.status}`);
+    }
+    if (!upstream.ok) {
+      throw new Error(data.error?.message || data.message || `HTTP ${upstream.status}`);
+    }
+    const content = data.choices?.[0]?.message?.content || "";
+    if (!content) throw new Error(data.error?.message || "Empty response from NoMask AI");
+    emit({ type: "content", delta: content });
+  }
+
   try {
+    let producedContent = false;
+
     for (let round = 0; round < 8; round++) {
-      const upstream = await fetch(`${NOMASK_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({
-          model,
-          messages: conversation,
-          temperature,
-          max_tokens: maxTokens,
-          tools: TOOLS,
-          tool_choice: "auto",
-          stream: true,
-        }),
-      });
+      const upstream = await callNomask({ stream: true, withTools: true });
 
       if (!upstream.ok) {
         const errText = await upstream.text();
@@ -272,7 +294,13 @@ async function handleChat(req, res, body) {
           const parsed = JSON.parse(errText);
           friendly = parsed.error?.message || parsed.message || friendly;
         } catch {}
-        emit({ type: "error", error: friendly });
+        // Retry once without tools / non-stream
+        try {
+          await nonStreamFallback();
+          producedContent = true;
+        } catch (e) {
+          emit({ type: "error", error: friendly || e.message });
+        }
         break;
       }
 
@@ -282,6 +310,7 @@ async function handleChat(req, res, body) {
       let toolCalls = {};
       let currentContent = "";
       let finishReason = null;
+      let streamError = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -293,18 +322,23 @@ async function handleChat(req, res, body) {
         for (const line of lines) {
           if (!line.startsWith("data:")) continue;
           const data = line.slice(5).trim();
-          if (data === "[DONE]") continue;
+          if (!data || data === "[DONE]") continue;
           try {
             const parsed = JSON.parse(data);
+            if (parsed.error) {
+              streamError = parsed.error.message || JSON.stringify(parsed.error);
+              continue;
+            }
             const choice = parsed.choices?.[0];
             if (!choice) continue;
             finishReason = choice.finish_reason || finishReason;
-            const delta = choice.delta;
-            if (delta?.content) {
+            const delta = choice.delta || {};
+            if (delta.content) {
               currentContent += delta.content;
+              producedContent = true;
               emit({ type: "content", delta: delta.content });
             }
-            if (delta?.tool_calls) {
+            if (delta.tool_calls) {
               for (const tc of delta.tool_calls) {
                 const idx = tc.index ?? 0;
                 if (!toolCalls[idx]) toolCalls[idx] = { id: tc.id, name: "", arguments: "" };
@@ -344,12 +378,31 @@ async function handleChat(req, res, body) {
         continue;
       }
 
+      if (!producedContent) {
+        if (streamError) {
+          try {
+            await nonStreamFallback();
+            producedContent = true;
+          } catch (e) {
+            emit({ type: "error", error: streamError || e.message });
+          }
+        } else {
+          try {
+            await nonStreamFallback();
+            producedContent = true;
+          } catch (e) {
+            emit({ type: "error", error: e.message || "No response from NoMask AI" });
+          }
+        }
+      }
+
       break;
     }
 
     emit({ type: "done" });
   } catch (err) {
     emit({ type: "error", error: err.message });
+    emit({ type: "done" });
   }
 
   res.end();
